@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trading Desk</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230E141B'/><path d='M7 21l6-6 4 4 8-9' stroke='%236FD3B8' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+__PAGE_CSS__
+</style>
+<body>
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="bar1">
+      <div class="brand">
+        <span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l5-5 4 4 7-8"/></svg></span>
+        <h1>Trading Desk</h1>
+        <span class="env" id="env">Live</span>
+      </div>
+      <div class="bar-right">
+        <label class="asof-pick" title="Show the desk as it was on a past day">
+          <span>As of</span><input type="date" id="asofDate" aria-label="Show the desk as it was on a past day">
+        </label>
+        <button class="sync sync-btn" id="marketAt" type="button" title="Update the companies&rsquo; filings, prices and ratings now"></button>
+        <span class="sync" id="synced">account not synced yet</span>
+        <button class="refresh" id="refreshBtn" aria-label="Sync your account" title="Sync your account">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+        </button>
+      </div>
+    </div>
+    <nav id="nav" role="tablist" aria-label="Sections"></nav>
+  </div>
+</header>
+
+<main>
+  <div class="msg" id="msg" role="status"></div>
+  <div class="msg progress" id="marketMsg" role="status"></div>
+  <div class="asof-banner" id="asofBanner" role="status" hidden></div>
+
+  <!-- ============ OVERVIEW ============ -->
+  <section class="page" id="page-overview" role="tabpanel" aria-label="Overview">
+    <div class="page-head">
+      <h2>Overview</h2>
+    </div>
+
+    <!-- how to connect the broker .env names: its steps are broker.py's (BROKERS[...]["connect"]) -->
+    <div class="card setup" id="setup" hidden>
+      <div class="card-head"><h3 id="setupTitle">Connect your account (read-only)</h3></div>
+      <ol id="setupSteps"></ol>
+      <div class="co-note" id="setupOther"></div>
+    </div>
+
+    <!-- your money, in one place: the total, how it got there, and what it is made of -->
+    <div class="card money" id="valueCard">
+      <div class="money-top">
+        <div class="hero-num">
+          <div class="eyebrow muted">Account value</div>
+          <div class="big" id="total">–</div>
+          <div class="hero-sub" id="gain"></div>
+          <div class="vs-line" id="vsLine"></div>
+        </div>
+        <div class="lines" id="flows"></div>
+      </div>
+      <div id="statsCard"><div class="stats" id="stats"></div></div>
+    </div>
+
+    <div class="card" id="digestCard" hidden>
+      <div class="card-head"><h3>Since you last looked</h3><span class="sub" id="digestSub"></span></div>
+      <div id="digest"></div>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <div class="card-head"><h3>Worth reading</h3><span class="sub" id="headSub"></span></div>
+        <div id="headlines"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Coming up</h3><span class="sub">reporting dates</span></div>
+        <div id="upcoming"></div>
+      </div>
+    </div>
+
+    <!-- what each data source did at the last update (health.py); python3 doctor.py says more -->
+    <div class="card" id="healthCard" hidden><div id="healthRow"></div></div>
+    <!-- the desk's figures rebuilt from the records, against the broker's own (checks.py) -->
+    <div class="card" id="checksCard" hidden><div id="checksRow"></div></div>
+  </section>
+
+  <!-- ============ HISTORY: the account year by year (history.py) ============ -->
+  <section class="page" id="page-history" role="tabpanel" aria-label="History">
+    <div class="page-head">
+      <h2>History</h2>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Returns by year</h3><div class="sub" id="histSub"></div></div></div>
+      <div id="histBody"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Income and costs by year</h3><div class="sub" id="histIncomeSub"></div></div></div>
+      <div id="histIncome"></div>
+    </div>
+  </section>
+
+  <!-- ============ PORTFOLIO ============ -->
+  <section class="page" id="page-portfolio" role="tabpanel" aria-label="Portfolio">
+    <div class="page-head">
+      <h2>Portfolio</h2>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Where your money is</h3><div class="sub" id="mixSub"></div></div></div>
+      <div id="mixChart"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Your money by industry</h3><div class="sub" id="expSub"></div></div></div>
+      <div id="expBody"></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div><h3>Holdings</h3><div class="sub" id="holdSub"></div></div>
+        <div class="seg" role="group" aria-label="Sort holdings" id="holdSort">
+          <button data-k="value" aria-pressed="true">Value</button>
+          <button data-k="pl">Gain</button>
+          <button data-k="pl_pct">Gain %</button>
+          <button data-k="ticker">A–Z</button>
+        </div>
+      </div>
+      <div id="holdList"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>What investing has cost</h3><div class="sub" id="costSub"></div></div></div>
+      <div id="costBody"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Dividends</h3><div class="sub" id="divSub"></div></div></div>
+      <div class="grid2">
+        <div class="chart" id="divChart"></div>
+        <div class="payers" id="divPayers"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COMPANIES ============ -->
+  <section class="page" id="page-companies" role="tabpanel" aria-label="Companies">
+    <div class="page-head">
+      <h2>Companies</h2>
+      <details class="page-fold"><summary>About the ranges on this page</summary><p class="page-note" id="coNote"></p></details>
+    </div>
+    <div class="wl co-follow" id="watchlist">
+      <input id="wlAdd" placeholder="+ Follow a ticker" maxlength="8" aria-label="Follow a company by its ticker" autocomplete="off" autocapitalize="characters">
+      <span class="faint" id="wlMsg" style="font-size:13.5px"></span>
+    </div>
+    <div id="coList"></div>
+  </section>
+
+  <!-- ============ NEWS ============ -->
+  <section class="page" id="page-news" role="tabpanel" aria-label="News">
+    <div class="page-head"><h2>News</h2></div>
+    <div class="card">
+      <div class="card-head"><div><h3>News on the companies you follow</h3><div class="sub" id="cnSub"></div></div>
+        <div class="seg" role="group" aria-label="Filter news" id="cnFilter">
+          <button data-f="all" aria-pressed="true">All</button>
+          <button data-f="press">FT and the press</button>
+          <button data-f="unusual">Unusual days</button>
+        </div>
+      </div>
+      <div id="cnList"></div>
+    </div>
+  </section>
+
+  <!-- ============ FILINGS ============ -->
+  <section class="page" id="page-filings" role="tabpanel" aria-label="Filings">
+    <div class="page-head">
+      <h2>Filings</h2>
+      <details class="page-fold"><summary>About the ranges on this page</summary><p class="page-note" id="reactNote"></p></details>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div><h3>Filings from the companies you follow</h3><div class="sub" id="newsSub"></div></div>
+        <div class="seg" role="group" aria-label="Filter filings" id="newsFilter">
+          <button data-f="material" aria-pressed="true">Important</button>
+          <button data-f="all">All</button>
+          <button data-f="4">Insider</button>
+        </div>
+      </div>
+      <div id="newsList"></div>
+    </div>
+  </section>
+
+  <!-- ============ RESEARCH ============ -->
+  <section class="page" id="page-research" role="tabpanel" aria-label="Research">
+    <div class="page-head">
+      <h2>Research</h2>
+      <p class="page-note asof-only">Not shown for a past day: the rule tests ran on price history that runs past that day.</p>
+    </div>
+    <div class="card" id="buyCard">
+      <div class="card-head"><div><h3>The desk&rsquo;s Buy list</h3><div class="sub" id="blSub"></div></div></div>
+      <div id="blList"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Does it work?</h3><div class="sub" id="btSub"></div></div></div>
+      <div id="btVerdict"></div>
+      <div id="btRules"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>The desk&rsquo;s rating: its record</h3><div class="sub" id="rtSub"></div></div></div>
+      <div id="rtBody"></div>
+    </div>
+    <div class="card">
+      <details class="fold"><summary><span class="fold-t">How this was tested</span><span class="fold-g" id="btWindow"></span></summary>
+        <div class="co-note faint" id="btNote" style="font-size:13.5px"></div></details>
+    </div>
+  </section>
+
+  <!-- ============ SCREENER ============ -->
+  <section class="page" id="page-screener" role="tabpanel" aria-label="Screener">
+    <div class="page-head">
+      <h2>Screener</h2>
+      <p class="page-note asof-only">Not shown for a past day: it screens the SEC's frames data, which carries no filing dates and holds figures restated since.</p>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Published screens</h3><div class="sub">each applies its own author's thresholds</div></div></div>
+      <div id="scPresets" class="co-actions"></div>
+      <div class="co-note faint" id="scPresetNote" style="margin-top:10px;font-size:13px"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Your own conditions</h3><div class="sub">comma separated, e.g. net_margin&gt;0.15, current_ratio&gt;2</div></div></div>
+      <div class="co-actions">
+        <input id="scWhere" class="sc-in" style="flex:1;min-width:280px" placeholder="revenue&gt;1000000000, gross_profitability&gt;0.33">
+        <button class="btn primary" id="scRun">Run</button>
+      </div>
+      <div class="co-note faint" id="scMeasures" style="margin-top:10px;font-size:12.5px"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3 id="scTitle">Results</h3><div class="sub" id="scSub"></div></div></div>
+      <div id="scCoverage"></div>
+      <div id="scResults"><div class="empty">Pick a screen above, or write your own conditions.</div></div>
+    </div>
+  </section>
+
+  <!-- ============ JOURNAL ============ -->
+  <section class="page" id="page-journal" role="tabpanel" aria-label="Journal">
+    <div class="page-head">
+      <h2>Your trades</h2>
+    </div>
+    <div class="card" id="checkCard">
+      <div class="card-head"><div><h3>Check a trade</h3><div class="sub" id="checkSub">the facts, before you place it</div></div></div>
+      <form class="ck-form" id="ckForm" autocomplete="off">
+        <div class="seg" role="group" aria-label="Buy or sell" id="ckSide">
+          <button type="button" data-side="BUY" aria-pressed="true">Buy</button>
+          <button type="button" data-side="SELL" aria-pressed="false">Sell</button>
+        </div>
+        <input id="ckTicker" placeholder="Ticker" maxlength="8" autocapitalize="characters" aria-label="Ticker">
+        <input id="ckAmount" type="number" min="0" step="any" inputmode="decimal" placeholder="Amount" aria-label="Amount, in the account's currency">
+        <button class="btn primary" id="ckGo">Check</button>
+      </form>
+      <div id="ckOut" role="status"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Plans</h3><div class="sub" id="plSub"></div></div>
+        <button class="btn" id="planNew" type="button">Write a plan</button></div>
+      <div id="plList"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Was it better than doing nothing?</h3><div class="sub" id="ctSub"></div></div></div>
+      <div id="ctList"></div>
+    </div>
+    <div class="card" id="habitCard">
+      <div class="card-head"><div><h3>Your habits</h3><div class="sub">measured as the studies of investors measured theirs</div></div></div>
+      <div id="habitList"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Your theses, scored</h3><div class="sub" id="thSub"></div></div></div>
+      <div id="thList"></div>
+    </div>
+    <div class="card" id="tradeCard">
+      <div class="card-head">
+        <div><h3>Trades</h3><div class="sub" id="tradeSub"></div></div>
+        <div class="seg" role="group" aria-label="Filter trades" id="tradeFilter">
+          <button data-f="all" aria-pressed="true">All</button>
+          <button data-f="BUY">Buys</button>
+          <button data-f="SELL">Sells</button>
+        </div>
+      </div>
+      <div id="tradeList"></div>
+    </div>
+  </section>
+
+  <!-- ============ PRACTICE ============ -->
+  <section class="page" id="page-practice" role="tabpanel" aria-label="Practice">
+    <div class="page-head">
+      <h2>Practice</h2>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <div class="eyebrow">Practice portfolio</div>
+        <p class="warn-t" id="pUnread" hidden></p>
+        <div class="hero-num">
+          <div class="big" id="pTotal">–</div>
+          <div class="hero-sub" id="pReturn"></div>
+        </div>
+        <div class="lines" id="pLines"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Place a practice trade</h3><span class="sub" id="pCost">last close</span></div>
+        <div class="pform">
+          <div class="seg" role="group" aria-label="Side" id="pSide">
+            <button data-side="buy" aria-pressed="true">Buy</button>
+            <button data-side="sell" aria-pressed="false">Sell</button>
+          </div>
+          <select id="pTicker" aria-label="Ticker"></select>
+          <input id="pAmount" type="number" min="1" step="1" placeholder="Amount $" aria-label="Amount in dollars">
+          <textarea id="pReason" rows="2" maxlength="500" placeholder="Note (optional)" aria-label="Note"></textarea>
+          <div class="row">
+            <button class="btn primary" id="pSubmit">Place practice trade</button>
+            <span class="faint" id="pMsg" style="font-size:13.5px"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div><h3>Practice holdings</h3><div class="sub" id="pHoldSub"></div></div></div>
+      <div id="pMix" style="margin-bottom:16px"></div>
+      <div id="pHold"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div><h3>Practice trades</h3><div class="sub" id="pTradeSub"></div></div>
+        <button class="btn" id="pReset">Start over</button></div>
+      <div id="pTrades"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- one dialog for writing a thesis before a company reports (Phase 9) -->
+<dialog id="thesisDlg" class="dlg" aria-labelledby="thTitle">
+  <form method="dialog" id="thesisForm">
+    <h3 id="thTitle">Thesis</h3>
+    <p class="dlg-note" id="thWhat"></p>
+    <label for="thRev">Revenue, against the same quarter a year before</label>
+    <select id="thRev" required><option value="" disabled selected>Choose</option><option value="up">Up</option><option value="down">Down</option></select>
+    <label for="thSize">Roughly by how much, in % (optional, not scored)</label>
+    <input id="thSize" type="number" step="0.5" inputmode="decimal">
+    <label for="thMargin">Operating margin, against the same quarter a year before</label>
+    <select id="thMargin" required><option value="" disabled selected>Choose</option><option value="up">Up</option><option value="down">Down</option></select>
+    <label for="thWhy">Why, in one line</label>
+    <input id="thWhy" maxlength="300" autocomplete="off" required>
+    <label for="thConf">How sure are you that both are right? (%)</label>
+    <input id="thConf" type="number" required>
+    <div class="msg" id="thMsg" role="status"></div>
+    <div class="row"><button class="btn primary" value="go">Write it — it cannot be changed</button>
+      <button class="btn" value="cancel" formnovalidate>Cancel</button></div>
+  </form>
+</dialog>
+
+<!-- a plan before a trade (plans.py): written once, matched to the trade, scored on its day -->
+<dialog id="planDlg" class="dlg" aria-labelledby="plTitle">
+  <form method="dialog" id="planForm">
+    <h3 id="plTitle">A plan before the trade</h3>
+    <p class="dlg-note" id="plWhat"></p>
+    <label for="plTicker">Company (its ticker)</label>
+    <input id="plTicker" autocomplete="off" autocapitalize="characters" required>
+    <label for="plSide">Buy or sell</label>
+    <select id="plSide" required><option value="" disabled selected>Choose</option><option value="BUY">Buy</option><option value="SELL">Sell</option></select>
+    <label for="plWhy">Why</label>
+    <textarea id="plWhy" rows="3" required></textarea>
+    <label for="plWrong">What would prove it wrong</label>
+    <textarea id="plWrong" rows="2" required></textarea>
+    <label for="plReview">Look at it again on</label>
+    <input id="plReview" type="date" required>
+    <div class="msg" id="plMsg" role="status"></div>
+    <div class="row"><button class="btn primary" value="go">Write it — it cannot be changed</button>
+      <button class="btn" value="cancel" formnovalidate>Cancel</button></div>
+  </form>
+</dialog>
+
+<!-- one dialog for following a company, from the Filings page or a screen (Phase 6) -->
+<dialog id="followDlg" class="dlg" aria-labelledby="fwTitle">
+  <form method="dialog" id="followForm">
+    <h3 id="fwTitle">Follow</h3>
+    <div id="fwReplace">
+      <label for="fwOut"></label>
+      <select id="fwOut"></select>
+    </div>
+    <div class="msg" id="fwMsg" role="status"></div>
+    <div class="row"><button class="btn primary" id="fwGo" value="go">Follow</button>
+      <button class="btn" value="cancel" formnovalidate>Cancel</button></div>
+  </form>
+</dialog>
+
+
+<script>
+__PAGE_JS__
+</script>
+</body>
+</html>

@@ -1,0 +1,117 @@
+# Where the desk's numbers come from
+
+Every number on the desk that could steer a decision, with the study it comes from, or marked
+plainly as the desk's own choice and why. Written on 28 September 2026, so that every number
+follows the most accurate studies there are.
+
+## What the research says matters most
+
+No study promises a return, and the most careful ones say the edges are small.
+
+- **Published effects shrink.** Across 97 findings, returns were 26% lower out of sample and
+  58% lower after publication (McLean & Pontiff 2016, *Journal of Finance*).
+- **Most findings do not survive a strict re-test.** With the NYSE's breakpoints and size
+  weights, 65% of 452 failed a t-value of 1.96, and 82% the multiple-testing hurdle of 2.78
+  (Hou, Xue & Zhang 2020, *Review of Financial Studies*). Those that survive cluster in value,
+  momentum, profitability and investment. Only 4% of the trading-friction group survived.
+- **What does survive falls into themes.** Most of 153 factors replicate, in 93 countries, and
+  fall into thirteen themes. Ten of them carry significant weight in the best combination of
+  all; profitability, investment and size do not, once the others are held (Jensen, Kelly &
+  Pedersen 2023, *Journal of Finance*).
+- **For one investor, how they trade matters more than any of these.** Households that traded
+  most earned 11.4% a year against the market's 17.9% (Barber & Odean 2000). The desk
+  measures the user's own turnover beside that finding (Trades → Your habits).
+
+## The desk's rating (`rating.py`, definition `2026-09-28b`, set out in `docs/RATING.md`)
+
+| Number | Source |
+|---|---|
+| Four themes, equal weights: Value, Momentum, Quality, Accruals | Jensen, Kelly & Pedersen (2023): four of the ten themes with significant weight in the tangency portfolio. Equal weights, as none is fitted to the desk's own data; one score across themes, not a mix of separate picks (Fitzgibbons, Friedman, Pomorski & Serban 2017) |
+| Each measure's theme | Jensen, Kelly & Pedersen's published cluster labels (`be_me`, `chcsho_12m` Value; `ret_12_1` Momentum; `gp_at` Quality; `oaccruals_at` Accruals) |
+| Book to market, at the latest price | Fama & French (1992); a timely price, Asness & Frazzini (2013), whose timely value earned 3.05–3.78% a year of alpha over the standard measure |
+| Share count change, split-restated | Pontiff & Woodgate (2008) |
+| Momentum: month −13 to month −2 | Jegadeesh & Titman (1993); the latest month left out because a month's move tends to reverse (Jegadeesh 1990) |
+| Gross profit to assets | Novy-Marx (2013); held in Hou, Xue & Zhang (0.38% a month, t = 2.62) |
+| Accruals: earnings less operating cash flow, over assets | Sloan (1996), in the cash-flow form of Hribar & Collins (2002) |
+| NYSE breakpoints; over-the-counter shares not rated | Fama & French (2008); Hou, Xue & Zhang (2020) |
+| Thirds: top Buy, bottom Sell | Jensen, Kelly & Pedersen build every factor from the top third against the bottom third |
+| Asset growth, F-score, low risk left out | Their themes are displaced (Jensen, Kelly & Pedersen 2023); the F-score is weakest among large, size-weighted companies; low risk is contested (Hou, Xue & Zhang 2020; Novy-Marx & Velikov 2022) |
+| Banks, insurers and property companies not rated | The papers' own exclusion: the measures were built on industrial companies |
+| Sample of 200, drawn once | The desk's choice, within Tiingo's free budget: a third's breakpoint to about ±3 places in a hundred (one standard error, 3.3) |
+| Price measures wait for 3 in 4 of the sample | The desk's choice: at 150, about ±3.8 places |
+| A rating needs 3 of 4 themes | The desk's choice |
+| Scored at 3, 6 and 12 months, with exact intervals | Horizons of the papers' holding periods; Clopper & Pearson (1934); Benjamini & Yekutieli (2005) for records read side by side |
+
+## The rule tests (`research.py`, `PREREGISTRATION.md`)
+
+| Number | Source |
+|---|---|
+| 70% to learn, the last 30% held out and alone reported | Pre-registered before the run |
+| p-values from a stationary block bootstrap | Politis & Romano (1994) |
+| Corrected for testing many rules; "clears" at q < 0.05 | Benjamini & Hochberg (1995) |
+| Costs: 0.15% a side | Trading 212's currency conversion fee, a plain fact; cash earns the 3-month Treasury bill rate (FRED DTB3) |
+
+## News, moves and filings
+
+| Number | Source |
+|---|---|
+| A story counts when it names the company in the headline or first 25 words | Tetlock, Saar-Tsechansky & Macskassy (2008) |
+| A day's move is unusual outside the 95% range of the shares' own moves against the market over the 250 trading days before | MacKinlay (1997), the market model's estimation window |
+| A past reaction counts only outside the last one's longest window | MacKinlay (1997): overlapping windows are one price move |
+| A reaction's window opens at the close before the first session the filing could move, by its acceptance time | MacKinlay (1997): the event's own day is in the window |
+| News never enters the rating | The evidence on news tone is about days (Tetlock et al. 2008; Heston & Sinha 2017); the rating's is about a year |
+
+## The company card
+
+| Number | Source |
+|---|---|
+| Piotroski F-score, its nine signals | Piotroski (2000) |
+| Altman Z'': above 2.6 safe, 1.1–2.6 grey, below 1.1 distress | Altman's own cut-offs for Z'' (1993, 2000) |
+| Analysts' ratings shown with their bias to "buy" | Barber, Lehavy, McNichols & Trueman (2001) |
+| Estimates drift down before results | Richardson, Teoh & Wysocki (2004) |
+| The price against its own five years of earnings | A plain fact, the desk's window; no study finds a company's own P/E history predicts its return |
+
+## The screener's published screens (`screen.PRESETS`)
+
+| Screen | Source |
+|---|---|
+| Gross profitability, the NYSE's top third | Novy-Marx (2013); the cut is computed from the NYSE's companies on the day |
+| Four of Piotroski's nine signals | Piotroski (2000): his own zero lines |
+| Graham's defensive criteria | Graham (1973), a book's rules, not a finding tested on returns: $100m of 1972's sales ($760m today by the CPI-U, 41.8 in 1972 against 317.7 in 2025), a current ratio of 2, long-term debt no more than working capital |
+| Dividends covered by free cash flow | Arithmetic: below 1 the dividend is not funded by the business |
+
+## Your trading and your account
+
+| Number | Source |
+|---|---|
+| Turnover: each month half the sales turnover and half the purchase turnover, the shares sold that month and bought the month before, matched to the holdings at its start, at that day's prices, over their value; twelve months averaged, times twelve | Barber & Odean (2000), section I.B, beside their 75% a year average; with a line listed elsewhere held, over the US lines, as their households held US common stocks |
+| Gains against losses sold (PGR, PLR), each holding against its average purchase price | Odean (1998), beside his 14.8% and 9.8% |
+| What replaced a sale: a purchase within 21 days, followed for 252 trading days | Odean (1999) |
+| Returns money-weighted, never annualised under a year | GIPS |
+| The S&P 500 with the same money on the same days | A plain comparison: SPY's total return |
+| History's rebuilt years used while today's rebuild ties to the broker's total within 1% | The desk's choice, a check on the data, not a finding |
+
+## Checks on the data, the desk's own tolerances
+
+| Number | Why |
+|---|---|
+| Shares rebuilt from the trades agree with the broker's within 0.0001 of a share | Fractional fills are rounded in the record |
+| Cash, total and closed gains agree within 1% of the account | As History's check: rounding and a day's price move less than this; a missing record more |
+| The desk's latest close within 10% of the broker's price | More than a usual day's move: a split missed or a ticker read as another company |
+| A quote 25% or more from the close is flagged | A split overnight reads as -50% until a close has it |
+
+## Built on purpose, not on research
+
+These steer nothing about what to buy: how often the company data updates (30 minutes), how
+many items a list shows, how long a visit lasts, a plan matched to a trade within 7 days, a
+week of news in a brief. Each is labelled in the code as the desk's choice.
+
+## What the evidence suggests, not built yet
+
+- **Momentum scaled by its own recent volatility.** Barroso & Santa-Clara (2015) nearly doubled
+  momentum's Sharpe ratio (0.97 against 0.53) by scaling it down when its last six months were
+  volatile; Daniel & Moskowitz (2016) found its crashes follow market falls and high volatility.
+  It needs a history of the sample's momentum returns the desk does not yet keep.
+- **Debt issuance and low leverage**, two more of the ten themes, need filing figures the
+  desk's universe does not yet fetch.
+- **Low risk** will be added if the careful re-tests come to agree.

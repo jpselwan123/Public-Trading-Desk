@@ -1,0 +1,61 @@
+# ---- secrets: never commit ----
+.env
+.env.*
+!.env.example
+CLAUDE.local.md
+
+# ---- personal account data and everything derived from it ----
+t212_data.json
+account.csv
+exports/
+desk_data.json
+journal.json
+theses.json
+diffs.json
+news_data.json
+headlines.json
+health.json
+looks.json
+plans.json
+rating_sample.json
+fundamentals.json
+earnings_data.json
+prices.json
+quotes.json
+ratings_log.json
+summaries.json
+briefs.json
+paper.json
+research.json
+power.json
+analysts_data.json
+watchlist.json
+.cik_map.json
+index.html
+*.tmp
+server.log
+
+# ---- generated demo output (python3 scripts/generate_demo_data.py) ----
+demo/
+
+# ---- the app, built by native_app/build.sh ----
+native_app/build/
+
+# ---- Python / OS / editors ----
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+.vscode/
+.idea/
+.claude/
+universe.json
+listings.json
+screen.json
+sectors.json
+value.json
+
+
+# ---- the bundle for the iPhone (scripts/phone_bundle.py): account data and keys ----
+TradingDesk-phone.zip
+PHONE_BUNDLE.json
