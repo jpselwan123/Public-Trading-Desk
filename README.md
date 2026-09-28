@@ -17,11 +17,24 @@ Connect **Trading 212**, **Alpaca**, **Interactive Brokers**, or **any broker th
 ## Why use it
 
 - **It checks its own arithmetic.** At every build, the desk rebuilds your shares, cash, total, closed gains and prices from your broker's raw records and sets each beside the broker's own figure. If one disagrees, it says which and by how much, so a mistake shows up instead of hiding.
-- **Your data stays with you.** A small Python server on `127.0.0.1` serves the page. Your account records, keys and notes live in files on your computer that git ignores.
+- **Your data stays with you.** A small Python server on `127.0.0.1` serves the page, and the page loads nothing from the internet. Your account records, keys and notes live in files on your computer that git ignores. [What it connects to, host by host.](docs/NETWORK.md)
 - **Read only, at every broker.** Nothing in the code can place, change or cancel an order. A test scans every module that reaches a broker for a write.
 - **Nothing to install.** Python 3.9 or later, standard library only.
 - **Evidence, not vibes.** Every rule and threshold comes from a published study, or is marked as the desk's own choice and why ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)). Any count read as evidence carries its interval. Trading rules are tested the strict way, and the result so far is honest: [none beat luck](#what-the-rule-tests-found).
 - **Tested.** Over 600 tests, with no network or keys. A simulated account whose right answers are known to the cent is fed through each broker's own format and has to come out right.
+
+## Can you trust it with your account?
+
+You shouldn't have to take anyone's word, mine included, so the desk is built to be checked and to need as little from you as possible:
+
+- **Start with nothing.** `./desk.sh --demo` needs no keys. A CSV export (`BROKER=csv`) needs no key and no connection to your broker at all. Only then, if you want, add an API key.
+- **Give it a key that can't trade.** A Trading 212 key made without the *Orders* permission is refused by Trading 212 itself if anything tried to trade, whatever the code does. Interactive Brokers' Flex reports have no trading access. Alpaca has no read-only key, so try it on a paper account first.
+- **There is no service.** No website to sign up to, no account, no server run by the author, no analytics or telemetry. The desk is a program on your computer serving a page to your own browser, and the page loads nothing from the internet.
+- **Every destination is listed.** [`docs/NETWORK.md`](docs/NETWORK.md) is the complete list of hosts the desk talks to, what each is sent and when. A test fails if the code gains a destination that isn't listed there.
+- **It is small enough to read.** Standard library only, so there are no hidden dependencies, and the broker readers are a few hundred lines each. A test scans them for anything that could place an order.
+- **It stays as you left it.** Code updates are off unless you turn on `AUTO_UPDATE`. Clone a commit you have read and it only changes when you change it.
+
+Nobody has audited this code but its author and its tests, and it is early. If you read it and find something, that is exactly what [`SECURITY.md`](SECURITY.md) is for.
 
 ## Screenshots
 
