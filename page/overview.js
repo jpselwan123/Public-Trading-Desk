@@ -7,7 +7,7 @@ function renderHeader(){
   $('env').hidden = !DATA.connected && !DATA.demo;             // no account yet: neither live nor practice
   $('synced').textContent = DATA.synced_at ? 'account ' + fmtStamp(DATA.synced_at) : 'account not synced yet';
   const sync = B.key === 'csv' ? 'Read your export again'
-    : 'Sync your ' + brokerName() + ' account' + (B.key === 'trading212' ? '' : '');
+    : 'Sync your ' + brokerName() + ' account';
   $('refreshBtn').setAttribute('aria-label', sync);
   $('refreshBtn').title = sync;
   safe(renderMarketAt);

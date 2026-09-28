@@ -374,8 +374,10 @@ class BrokerWiringTests(unittest.TestCase):
         Alpaca's reaches three read paths, and no request is anything but a read."""
         self.assertFalse(hasattr(t212.Client, "post"))
         self.assertNotIn("/execute", inspect.getsource(server.Handler))
-        for name in ("t212.py", "broker.py", "broker_csv.py", "broker_alpaca.py", "broker_ibkr.py"):
-            text = open(os.path.join(ROOT, name)).read()                   # every module that reaches a broker
+        modules = ["t212.py"] + sorted(n for n in os.listdir(ROOT) if n.startswith("broker") and n.endswith(".py"))
+        self.assertTrue({"broker.py", "broker_csv.py", "broker_alpaca.py", "broker_ibkr.py"} <= set(modules))
+        for name in modules:                                               # every module that reaches a broker,
+            text = open(os.path.join(ROOT, name)).read()                   # a contributor's new adapter included
             for never in (".post(", "POST", "DELETE", "PATCH", "PUT"):
                 self.assertNotIn(never, text, name)
         self.assertEqual(broker_alpaca.Client.PATHS, ("/v2/account", "/v2/positions", "/v2/account/activities"))
