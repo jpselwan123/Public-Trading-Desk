@@ -111,6 +111,13 @@ python3 doctor.py [--account|--offline]              # the health report: safe t
   fault in one update step fails that step alone (`server.run_steps`), and a store holding the
   user's own record — plans, theses, notes, the ratings log, the followed list, the practice
   book — that is there but cannot be read is never written over (`env_config.read_for_writing`).
+- **The demo has invented companies** (29 Sep 2026, `scripts/generate_demo_data.py`): the account, and a market of
+  companies that do not exist (`DEMO_COMPANIES`, CIKs the SEC has not reached), made by the desk's own company
+  update run over the simulated market of the tests (`tests/world.py`, `world.use_demo_roster`), so every screen
+  is filled and nothing shown is a real company's figure or a real outlet's story (no press stories at all;
+  `DemoWorldTests` searches every demo store for real names). The demo reads and writes only its own folder:
+  `build_desk.keep_apart` points the stores kept beside the code (universe, exchange list, industry codes,
+  screens, price ratios, filer map) at it, in the server, the build and the phone. It is rebuilt at each start.
 - **The demo is apart from the desk.** Every write it makes goes to its own folder (summaries,
   practice trades priced from its own closes, its own followed list).
 - **Checked against the broker at every build, and against a known truth in the tests**

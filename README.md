@@ -10,9 +10,9 @@
 
 Connect **Trading 212**, **Alpaca**, **Interactive Brokers**, or **any broker that can export your history as a CSV file**. The desk reads your account (it can never trade) and shows what you own, what it has earned against the S&P 500, what the companies you hold are filing and reporting, and what published research says about them. Every figure is either a fact from your account or a calculation from a named study, shown with its limits. Everything runs on your machine.
 
-![The desk's Overview, on its synthetic demo account](docs/screens/overview.png)
+![The desk's Overview, on its demo](docs/screens/overview.png)
 
-*The demo account: made-up holdings and prices, so you can look around with no keys and no network.*
+*The demo: an invented account and invented companies (none of them exists), so you can look around every screen with no keys and no network.*
 
 ## Why use it
 
@@ -42,13 +42,17 @@ Nobody has audited this code but its author and its tests, and it is early. If y
 |---|---|
 | ![History](docs/screens/history.png) | ![Portfolio](docs/screens/portfolio.png) |
 
+| Companies: rating, results, news, filings | Research: the Buy list and the rating's record |
+|---|---|
+| ![Companies](docs/screens/companies.png) | ![Research](docs/screens/research.png) |
+
 ![Trades: was it better than doing nothing?](docs/screens/trades.png)
 
-*Company cards, the news and the screener fill in once you add the free data keys below. They need live data, so the demo leaves them empty.*
+*Everything on these screens is invented: the account, the companies (about 270 of them), their filings, figures and stories, made by the desk's own code over a simulated market (`scripts/generate_demo_data.py`). With your own keys the same screens fill with real companies.*
 
 ## Try it in a minute
 
-The demo needs no keys and no network.
+The demo needs no keys and no network. It builds its invented market in a few seconds.
 
 ```bash
 git clone https://github.com/jpselwan123/Public-Trading-Desk.git ~/trading-desk

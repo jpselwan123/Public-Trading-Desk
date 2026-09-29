@@ -1,7 +1,10 @@
-"""Synthetic Trading 212 account for the demo page, tests and screenshots.
+"""Synthetic account and market for the demo page, tests and screenshots.
 
-Invented investor, invented prices (random walks), real Trading 212 response
-shapes. Nothing here comes from a real account.
+Invented investor, invented prices (random walks), real Trading 212 response shapes. Nothing here
+comes from a real account. The demo (`main`) also has invented companies, with invented filings,
+figures, news and ratings: the desk's own pipeline run over a simulated market (tests/world.py), so
+every screen has something on it. None of those companies exists, and none of the stories is a real
+outlet's.
 
 Usage: python3 scripts/generate_demo_data.py [outdir]     (default: demo/)
 """
@@ -29,17 +32,45 @@ UNIVERSE = [
 ]
 FEE_RATE = 0.0015           # currency-conversion style fee on each fill
 
+# The demo's companies: invented, so nothing shown for them is a real company's figure or a real
+# outlet's story. The first eight are held, in the position of the real names the tests use (their
+# prices and trades are the same numbers); the last three are companies the demo follows.
+# ticker, name, exchange, SIC, CIK (a range the SEC has not reached), revenue $bn a year,
+# start price, yearly drift, yearly volatility, dividend per share per quarter
+DEMO_COMPANIES = [
+    ("ALDV", "Alder Devices Inc.", "Nasdaq", 3571, 9000001, 390.0, 165.0, 0.12, 0.27, 0.24),
+    ("MRSW", "Meridian Software Corp.", "Nasdaq", 7372, 9000002, 250.0, 290.0, 0.14, 0.25, 0.75),
+    ("NVLX", "Novalux Semiconductor Corp.", "Nasdaq", 3674, 9000003, 130.0, 45.0, 0.45, 0.50, 0.01),
+    ("CSKD", "Cascade Retail Group", "Nasdaq", 5961, 9000004, 620.0, 105.0, 0.12, 0.32, 0.0),
+    ("HRLN", "Harlan Health Sciences", "NYSE", 2834, 9000005, 88.0, 160.0, 0.02, 0.16, 1.19),
+    ("KSTR", "Keystone Beverage Co.", "NYSE", 2080, 9000006, 46.0, 60.0, 0.04, 0.14, 0.48),
+    ("TSRA", "Terra Motors Inc.", "Nasdaq", 3711, 9000007, 97.0, 190.0, 0.05, 0.60, 0.0),
+    ("PYVO", "Payvo Holdings, Inc.", "Nasdaq", 7389, 9000008, 31.0, 75.0, -0.08, 0.40, 0.0),
+    ("ARMD", "Arcadia Micro Devices Inc.", "Nasdaq", 3674, 9000009, 26.0, 100.0, 0.20, 0.45, 0.0),
+    ("SMTE", "Summit Energy Corp.", "NYSE", 2911, 9000010, 340.0, 105.0, 0.03, 0.22, 0.0),
+    ("FHVN", "Fairhaven Financial Corp.", "NYSE", 6021, 9000011, 160.0, 140.0, 0.08, 0.22, 0.0),
+]
+COMPANY_STORES = ("analysts_data.json", "diffs.json", "earnings_data.json", "fundamentals.json", "headlines.json", "listings.json",
+                  "news_data.json", "prices.json", "quotes.json", "rating_sample.json", "ratings_log.json", "research.json",
+                  "screen.json", "sectors.json", "universe.json", "value.json", "watchlist.json", ".cik_map.json")
+FOLLOWED = ("ARMD", "SMTE", "FHVN")             # covered in the demo without being held
+_STOCK_FOR = dict(zip(("AAPL", "MSFT", "NVDA", "AMZN", "JNJ", "KO", "TSLA", "PYPL"), (c[0] for c in DEMO_COMPANIES)))
+# the account's lines in the demo: the same funds (prices made up) and the invented companies
+DEMO_UNIVERSE = [(f"{_STOCK_FOR.get(t.split('_')[0], t.split('_')[0])}_US_EQ",
+                  next((c[1] for c in DEMO_COMPANIES if c[0] == _STOCK_FOR.get(t.split('_')[0])), n), *rest)
+                 for t, n, *rest in UNIVERSE]
+
 
 def iso(d, hour=15, minute=31):
     return datetime(d.year, d.month, d.day, hour, minute, tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def walks(rnd, today):
+def walks(rnd, today, universe=None):
     """The first day and each line's daily price walk {ticker: {day: price}}, weekends at
     Friday's price. Drawn first from the account's own random sequence."""
     start = today - timedelta(days=int(365 * 2.6))
     prices = {}
-    for t, _, p0, mu, vol, _ in UNIVERSE:
+    for t, _, p0, mu, vol, _ in universe or UNIVERSE:
         p, series, d = p0, {}, start
         while d <= today:
             if d.weekday() < 5:
@@ -50,30 +81,13 @@ def walks(rnd, today):
     return start, prices
 
 
-def demo_prices(today=None, seed=SEED):
-    """The demo's own closes, as prices.json keeps them: each line at the prices its trades were
-    filled at, weekdays only, and the S&P 500 (SPY) along the Vanguard S&P 500 fund's walk, so
-    the demo's comparisons with the market and its History have closes to read. No splits."""
-    today = today or datetime.now(timezone.utc).date()
-    _, prices = walks(random.Random(seed), today)
-    store = {}
-    for t, series in prices.items():
-        store[t.split("_")[0]] = {d.isoformat(): {"c": round(p, 4), "a": round(p, 4)}
-                                  for d, p in series.items() if d.weekday() < 5}
-    store["SPY"] = dict(store["VOO"])
-    first = min(min(v) for v in store.values())
-    names = sorted(store)
-    store.update({"_whole": {t: today.isoformat() for t in names}, "_starts": {t: first for t in names},
-                  "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
-    return store
-
-
-def generate(today=None, seed=SEED):
+def generate(today=None, seed=SEED, universe=None):
+    universe = universe or UNIVERSE
     rnd = random.Random(seed)
     today = today or datetime.now(timezone.utc).date()
-    start, prices = walks(rnd, today)
-    names = {t: n for t, n, *_ in UNIVERSE}
-    divs = {t: dv for t, *_, dv in UNIVERSE}
+    start, prices = walks(rnd, today, universe)
+    names = {t: n for t, n, *_ in universe}
+    divs = {t: dv for t, *_, dv in universe}
 
     cash, holdings, realized = 0.0, {}, 0.0      # holdings: ticker → [qty, cost]
     transactions, orders, dividends = [], [], []
@@ -120,7 +134,7 @@ def generate(today=None, seed=SEED):
             transactions.append({"type": "DEPOSIT", "amount": amt, "currency": "USD", "dateTime": iso(d, 9, 5), "reference": f"dep-{ref}"}); ref += 1
             # spend most of the cash on 1–3 buys
             for _ in range(rnd.randint(1, 3)):
-                t = rnd.choice(UNIVERSE[:9] if rnd.random() < 0.85 else UNIVERSE)[0]
+                t = rnd.choice(universe[:9] if rnd.random() < 0.85 else universe)[0]
                 budget = cash * rnd.uniform(0.3, 0.7)
                 q = round(budget / prices[t][d], 4)
                 if q > 0 and budget > 20:
@@ -182,13 +196,49 @@ def generate(today=None, seed=SEED):
     }
 
 
+def add_companies(out, today=None):
+    """The demo's invented companies and their market: the desk's own company update (filings,
+    financials, prices, news, ratings) run over a simulated market (tests/world.py) with the demo's
+    roster, into `out`. Nothing leaves the machine and nothing outside `out` is written; the
+    simulation is put back afterwards. The account and its prices come from `main`."""
+    import contextlib, io
+    tests = os.path.join(ROOT, "tests")
+    if tests not in sys.path:
+        sys.path.insert(0, tests)
+    import build_desk, news, server, world
+    for name in COMPANY_STORES:                     # a fresh market each time; the demo's notes and practice trades stay
+        try:
+            os.remove(os.path.join(out, name))
+        except OSError:
+            pass
+    restore_paths, restore_net = build_desk.keep_apart(out), world.install()
+    restore_roster = world.use_demo_roster()
+    try:
+        for ticker in FOLLOWED:
+            news.follow(ticker, path=os.path.join(out, "watchlist.json"))
+        handler = server.Handler.__new__(server.Handler)
+        handler.folder, handler.demo = out, False
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            result = handler.refresh_market()[1]
+        if not result.get("ok"):
+            raise RuntimeError("The demo's companies could not be built: " + str(result.get("message")))
+    finally:
+        restore_roster(); restore_net(); restore_paths()
+    for name in ("health.json", "looks.json", "index.html", "desk_data.json"):      # the demo keeps no log of a run
+        try:
+            os.remove(os.path.join(out, name))
+        except OSError:
+            pass
+
+
 def main(argv):
     out = os.path.abspath(argv[0]) if argv else os.path.join(ROOT, "demo")
     os.makedirs(out, exist_ok=True)
-    data = generate()
+    data = generate(universe=DEMO_UNIVERSE)
     atomic_write_json(os.path.join(out, "t212_data.json"), data)
-    atomic_write_json(os.path.join(out, "prices.json"), demo_prices())
-    print(f"Demo account → {out}/t212_data.json ({len(data['positions'])} positions, {len(data['orders'])} orders)")
+    add_companies(out)
+    print(f"Demo account → {out}/t212_data.json ({len(data['positions'])} positions, {len(data['orders'])} orders), "
+          f"{len(FOLLOWED) + len([p for p in data['positions'] if p['instrument']['ticker'].split('_')[0] in {c[0] for c in DEMO_COMPANIES}])} invented companies")
 
 
 if __name__ == "__main__":

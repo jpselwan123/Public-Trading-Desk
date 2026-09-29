@@ -982,6 +982,7 @@ def _number(v):
 def main(argv):
     if "--demo" in argv:
         Handler.folder, Handler.demo = os.path.join(HERE, "demo"), True
+        build_desk.keep_apart(Handler.folder)
     load_env(os.path.join(HERE, ".env"))
     Handler.remote_hosts = desk_hosts()
     server = ThreadingHTTPServer((HOST, PORT), Handler)

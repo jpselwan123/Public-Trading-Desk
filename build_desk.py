@@ -1450,6 +1450,26 @@ def load_inputs(folder):
     }
 
 
+DEMO_DIR = os.path.join(HERE, "demo")
+
+
+def keep_apart(folder):
+    """Point the stores the desk keeps beside its code (the SEC universe and its exchange list, the
+    industry codes, the screens, the price ratios, the filers' number map) at this folder, so the
+    demo reads the demo's and never the desk's own. Returns what puts them back."""
+    places = ((universe, "UNIVERSE_FILE", "universe.json"), (universe, "LISTINGS_FILE", "listings.json"),
+              (sectors, "SECTORS_FILE", "sectors.json"), (screen, "SCREEN_FILE", "screen.json"),
+              (value, "VALUE_FILE", "value.json"), (news_mod, "CIK_CACHE", ".cik_map.json"))
+    before = [(module, name, getattr(module, name)) for module, name, _ in places]
+    for module, name, file in places:
+        setattr(module, name, os.path.join(folder, file))
+
+    def restore():
+        for module, name, path in before:
+            setattr(module, name, path)
+    return restore
+
+
 def as_of(folder, day):
     """The page's data as it was at the end of a past day (Phase 11)."""
     import asof
@@ -1458,6 +1478,8 @@ def as_of(folder, day):
 
 def main(argv):
     folder = os.path.abspath(argv[0]) if argv else HERE
+    if folder == DEMO_DIR:
+        keep_apart(folder)
     data = compute(**load_inputs(folder))
     atomic_write_json(os.path.join(folder, "desk_data.json"), data)
     atomic_write(os.path.join(folder, "index.html"), render(data))

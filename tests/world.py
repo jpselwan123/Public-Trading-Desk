@@ -1,7 +1,7 @@
 """A simulated network for the tests: every source the desk reads (the SEC, Tiingo,
 FRED, Finnhub, Google News, Trading 212 and OpenAI), answering in the shape it does, from
 one seeded world (28 Sep 2026). A company update can then run whole, twice, as it runs on
-the user's Mac: the fault it found (the exchange list's step failing on every update
+the owner's Mac: the fault it found (the exchange list's step failing on every update
 after the first) was in no single module's test.
 
     restore = world.install()          # every urlopen in the desk now reaches the world
@@ -12,7 +12,7 @@ after the first) was in no single module's test.
 
 Nothing leaves the machine: a key in .env reaches this world and no further.
 """
-import collections, email.utils, io, json, math, os, random, re, socket, threading, time, urllib.error, urllib.parse, urllib.request, zipfile
+import collections, email.utils, io, json, math, os, random, re, socket, threading, time, urllib.error, urllib.parse, urllib.request, zipfile, zlib
 from datetime import date, datetime, timedelta, timezone
 from xml.sax.saxutils import escape
 
@@ -56,6 +56,54 @@ def _companies():
 COMPANIES = _companies()
 BY_TICKER = {c["ticker"]: c for c in COMPANIES}
 BY_CIK = {c["cik"]: c for c in COMPANIES}
+DEMO = False
+NAME_WORDS = (("Alder", "Birch", "Cedar", "Delta", "Ember", "Falcon", "Granite", "Harbor", "Iris", "Juniper", "Krypton", "Lumen",
+               "Maple", "Nimbus", "Onyx", "Pioneer", "Quartz", "Ridge", "Summit", "Tundra", "Umber", "Vertex", "Willow", "Zephyr"),
+              ("Analytics", "Biotech", "Capital", "Dynamics", "Energy", "Foods", "Freight", "Labs", "Logistics", "Materials",
+               "Networks", "Power", "Robotics", "Semiconductor", "Systems", "Therapeutics", "Utilities", "Works"),
+              ("Inc.", "Corp.", "Holdings", "Group", "Co."))
+
+
+def use_demo_roster():
+    """The demo's market (scripts/generate_demo_data.py): companies that do not exist, in place of the
+    real names above, so nothing the desk shows for them is a real company's figure. The eleven the
+    demo names are its own; the rest are filler, named from word lists. No stories come from a real
+    outlet, and none of these companies has a split. Returns what puts the real roster back."""
+    import generate_demo_data as g
+    global DEMO, OUTLETS
+    before = (list(COMPANIES), dict(BY_TICKER), dict(BY_CIK), dict(SPLITS), OUTLETS, DEMO)
+    rnd = random.Random(7)
+    out = [dict(ticker=t, cik=cik, name=name, exchange=ex, sic=sic, p0=p0, drift=mu, vol=vol, revenue=rev * 1e9, featured=True)
+           for t, name, ex, sic, cik, rev, p0, mu, vol, _ in g.DEMO_COMPANIES]
+    sics = [2834, 3674, 7372, 6021, 2911, 3711, 5961, 4911, 6798, 3571, 2080, 1311, 3841, 4813, 5812]
+    names = set(c["name"] for c in out)
+    for i in range(1, 261):
+        while True:
+            name = f"{rnd.choice(NAME_WORDS[0])} {rnd.choice(NAME_WORDS[1])} {rnd.choice(NAME_WORDS[2])}"
+            if name not in names:
+                names.add(name)
+                break
+        ex = "NYSE" if i % 3 else ("Nasdaq" if i % 2 else "OTC")
+        out.append(dict(ticker=f"Q{i:03d}", cik=9000100 + i, name=name, exchange=ex, sic=rnd.choice(sics),
+                        p0=rnd.uniform(5, 300), drift=rnd.uniform(-0.2, 0.3), vol=rnd.uniform(0.15, 0.6),
+                        revenue=rnd.uniform(0.05, 50) * 1e9))
+    COMPANIES[:] = out
+    BY_TICKER.clear(); BY_TICKER.update({c["ticker"]: c for c in COMPANIES})
+    BY_CIK.clear(); BY_CIK.update({c["cik"]: c for c in COMPANIES})
+    SPLITS.clear(); _SERIES.clear(); _ACCOUNT.clear()
+    _DEMO_CLOSES.clear()
+    DEMO = True
+    OUTLETS = ["Demo Wire", "Example Ledger", "Sample Post"]
+
+    def restore():
+        global DEMO, OUTLETS
+        COMPANIES[:] = before[0]
+        BY_TICKER.clear(); BY_TICKER.update(before[1])
+        BY_CIK.clear(); BY_CIK.update(before[2])
+        SPLITS.clear(); SPLITS.update(before[3])
+        OUTLETS, DEMO = before[4], before[5]
+        _SERIES.clear(); _ACCOUNT.clear(); _DEMO_CLOSES.clear()
+    return restore
 
 
 def sessions(start=date(2019, 1, 2), end=None):
@@ -77,7 +125,11 @@ def series(ticker):
     """[(day, raw close, adjusted close, split factor)] — a seeded random walk."""
     if ticker in _SERIES:
         return _SERIES[ticker]
-    c = BY_TICKER.get(ticker) or dict(p0=100 + (hash(ticker) % 300), drift=0.08, vol=0.18)
+    if DEMO and ticker in _demo_closes():
+        # the account's lines: the closes its trades were filled at, and SPY along the S&P 500 fund's walk
+        _SERIES[ticker] = [(d, v["c"], v["a"], 1.0) for d, v in sorted(_demo_closes()[ticker].items())]
+        return _SERIES[ticker]
+    c = BY_TICKER.get(ticker) or dict(p0=100 + (zlib.crc32(ticker.encode()) % 300), drift=0.08, vol=0.18)
     rnd = random.Random(ticker)
     days, price, out = sessions(), c["p0"], []
     split_day, factor = SPLITS.get(ticker, (None, 1.0))
@@ -94,6 +146,36 @@ def series(ticker):
         out.append((d.isoformat(), round(raw, 4), round(adj, 4), s))
     _SERIES[ticker] = out
     return out
+
+
+def demo_prices(today=None, seed=None, universe=None):
+    """The demo's own closes, as prices.json keeps them: each line at the prices its trades were
+    filled at, weekdays only, and the S&P 500 (SPY) along the Vanguard S&P 500 fund's walk, so
+    the demo's comparisons with the market and its History have closes to read. No splits."""
+    import generate_demo_data as g
+    today = today or datetime.now(timezone.utc).date()
+    _, prices = g.walks(random.Random(g.SEED if seed is None else seed), today, universe)
+    store = {}
+    for t, series in prices.items():
+        store[t.split("_")[0]] = {d.isoformat(): {"c": round(p, 4), "a": round(p, 4)}
+                                  for d, p in series.items() if d.weekday() < 5}
+    store["SPY"] = dict(store["VOO"])
+    first = min(min(v) for v in store.values())
+    names = sorted(store)
+    store.update({"_whole": {t: today.isoformat() for t in names}, "_starts": {t: first for t in names},
+                  "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+    return store
+
+
+_DEMO_CLOSES = {}
+
+
+def _demo_closes():
+    if not _DEMO_CLOSES:
+        import generate_demo_data as g
+        store = demo_prices(TODAY, universe=g.DEMO_UNIVERSE)
+        _DEMO_CLOSES.update({k: v for k, v in store.items() if isinstance(v, dict) and k not in ("_whole", "_starts")})
+    return _DEMO_CLOSES
 
 
 def quarters_for(c, n=24):
@@ -249,7 +331,7 @@ def frame(tag, unit, period):
                   "NetCashProvidedByUsedInOperatingActivities": rev * (gm - 0.1),
                   "WeightedAverageNumberOfDilutedSharesOutstanding": 1.5e9 * rnd.uniform(0.97, 1.03),
                   "EntityCommonStockSharesOutstanding": 1.5e9,
-                  "EntityPublicFloat": 1.5e9 * series(c["ticker"])[-1][1] * 0.9 if c["cik"] < 900000 else rev * 3}
+                  "EntityPublicFloat": 1.5e9 * series(c["ticker"])[-1][1] * 0.9 if c.get("featured") or c["cik"] < 900000 else rev * 3}
         data.append({"accn": "x", "cik": c["cik"], "entityName": c["name"], "loc": "US-CA",
                      "end": f"{year}-12-31", "val": round(values[tag], 4)})
     return {"taxonomy": "us-gaap", "tag": tag, "ccp": period, "uom": unit, "pts": len(data), "data": data}
@@ -264,11 +346,21 @@ def dera_zip():
     return buf.getvalue()
 
 
+def short_name(c):
+    """What a story calls the company: its first word for the real names (Apple), and for the invented
+    ones the name without its legal form (Alder Devices), which is what the desk looks for."""
+    if not DEMO:
+        return c["name"].split(" ")[0].title()
+    words = c["name"].replace(",", "").split(" ")
+    while len(words) > 1 and words[-1] in ("Inc.", "Corp.", "Co.", "Holdings", "Group"):
+        words.pop()
+    return " ".join(words)
+
+
 def headline_for(c, k, day):
     subjects = ["reports quarterly results", "shares move after analyst day", "faces regulator questions",
                 "announces new product", "signs supply agreement", "names new finance chief"]
-    name = c["name"].split(" ")[0].title()
-    return f"{name} {subjects[(k + day.day) % len(subjects)]}"
+    return f"{short_name(c)} {subjects[(k + day.day) % len(subjects)]}"
 
 
 def finnhub(path, query):
@@ -286,15 +378,15 @@ def finnhub(path, query):
                 if at <= datetime.now(timezone.utc):
                     k = rnd.randint(0, 99)
                     out.append({"id": int(at.timestamp()), "datetime": int(at.timestamp()), "headline": headline_for(c, k, d),
-                                "url": f"https://news.example.com/{t}/{d.isoformat()}/{k}", "source": rnd.choice(["Yahoo", "SeekingAlpha", "Reuters"]),
-                                "summary": f"{c['name'].split(' ')[0].title()} said on {d.isoformat()} that business continued.", "category": "company"})
+                                "url": f"https://news.example.com/{t}/{d.isoformat()}/{k}", "source": rnd.choice(OUTLETS if DEMO else ["Yahoo", "SeekingAlpha", "Reuters"]),
+                                "summary": f"{short_name(c)} said on {d.isoformat()} that business continued.", "category": "company"})
             d += timedelta(days=1)
         return sorted(out, key=lambda r: -r["datetime"])
     if path == "calendar/earnings":
         if not c:
             return {"earningsCalendar": []}
         last = quarters_for(c)[-1]
-        nxt = date.fromisoformat(last["end"]) + timedelta(days=92 + 35)
+        nxt = date.fromisoformat(last["end"]) + timedelta(days=92 + 35 + (c["cik"] % 19 if DEMO else 0))
         if nxt <= TODAY:
             nxt = TODAY + timedelta(days=20)
         return {"earningsCalendar": [{"date": nxt.isoformat(), "hour": "amc", "epsEstimate": 1.23, "symbol": t,
@@ -315,6 +407,8 @@ def finnhub(path, query):
 
 
 def rss(query):
+    if DEMO:              # no invented company has press coverage, and none is attributed to a real paper
+        return '<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>search</title></channel></rss>'
     m = re.search(r'"([^"]+)"', query)
     name = m.group(1) if m else query.split()[0]
     c = next((x for x in COMPANIES if x["name"].split(" ")[0].title().lower() == name.lower().split(" ")[0]), None)
@@ -337,7 +431,7 @@ _ACCOUNT = {}
 def account():
     if not _ACCOUNT:
         import generate_demo_data
-        _ACCOUNT.update(generate_demo_data.generate(TODAY))
+        _ACCOUNT.update(generate_demo_data.generate(TODAY, universe=generate_demo_data.DEMO_UNIVERSE if DEMO else None))
     return _ACCOUNT
 
 
@@ -404,7 +498,7 @@ def fault(source, url):
     if mode == "garbage":
         return Answer(b"\x1f\x8b\x00garbage{{{")
     if mode == "html":
-        return Answer(b"<html><body><h1>Your network session has expired</h1></body></html>", headers={"Content-Type": "text/html"})
+        return Answer(b"<html><body><h1>Your VPN session has expired</h1></body></html>", headers={"Content-Type": "text/html"})
     if mode == "empty":
         return Answer(b"")
     return None

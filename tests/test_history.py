@@ -1,5 +1,6 @@
-"""History: the account year by year (history.py), added on 28 Sep 2026."""
+"""History: the account year by year (history.py), asked for by the owner on 28 Sep 2026."""
 from support import *  # noqa: F401,F403
+import world
 import history
 
 
@@ -151,7 +152,7 @@ class HistoryTests(unittest.TestCase):
     def test_the_demo_ties_to_the_penny_and_every_year_is_priced(self):
         today = date(2026, 9, 28)
         raw = generate_demo_data.generate(today)
-        d = build_desk.compute(raw, today=today, prices=generate_demo_data.demo_prices(today))
+        d = build_desk.compute(raw, today=today, prices=world.demo_prices(today))
         h = d["history"]
         self.assertTrue(h["check"]["ok"])
         self.assertLess(abs(h["check"]["difference"]), 0.5)
@@ -192,7 +193,7 @@ class HistoryPageTests(unittest.TestCase):
         self.assertRegex(css, r"@media \(max-width:640px\)\{\s*\.hist-tbl thead\{display:none;\}")
         today = date(2026, 9, 28)
         d = build_desk.compute(generate_demo_data.generate(today), today=today,
-                               prices=generate_demo_data.demo_prices(today))
+                               prices=world.demo_prices(today))
         html = build_desk.render(d)
         self.assertIn('id="histBody"', html)
         self.assertIn('id="page-history"', html)
