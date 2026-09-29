@@ -66,6 +66,30 @@ class DemoWorldTests(unittest.TestCase):
         self.assertGreaterEqual(len(self.data["checks"]["checks"]), 6)
         self.assertEqual(self.data["checks"]["failed"], [])
 
+    def test_the_tilt_is_the_holdings_own_places_weighted(self):
+        """The Portfolio's lean is the value-weighted mean of the places each holding already shows in its row, over
+        the invented companies the demo holds: the two cannot say different things (one definition)."""
+        d = self.data
+        self.assertEqual(d["tilt"], rating.tilt(d["positions"]["rows"], d["account"]["total"]))
+        self.assertNotIn("why", d["tilt"])
+        placed = {x["theme"]: x for x in d["tilt"]["themes"] if x["place"] is not None}
+        self.assertGreaterEqual(len(placed), 3)
+        for x in placed.values():
+            self.assertTrue(0 <= x["place"] <= 100, x)
+            self.assertTrue(0 < x["share"] <= d["tilt"]["share"] + 1e-9, x)
+
+    def test_the_demo_moves_with_its_market(self):
+        """Its lines share a market (generate_demo_data.MARKET_LOADING), so an account of index funds and shares reads
+        as one: a beta near one that the market explains most of. With independent walks the History's risk card read
+        0.03 and 0%, which a stranger would take for a fault."""
+        risk = self.data["history"]["risk"]
+        self.assertNotIn("why", risk)
+        self.assertTrue(0.6 < risk["beta"]["slope"] < 1.1, risk["beta"])
+        self.assertGreater(risk["beta"]["explained"], 0.5)
+        self.assertEqual(len(generate_demo_data.MARKET_LOADING), len(generate_demo_data.UNIVERSE))
+        self.assertTrue(all(0 <= x < 1 for x in generate_demo_data.MARKET_LOADING))
+        self.assertEqual(len(self.data["trades"]["rows"]), 77)                  # the market's draws are apart: the account's own are unchanged
+
     def test_results_days_are_not_all_one_day(self):
         self.assertGreater(len({c["next_earnings"]["date"] for c in self.data["companies"] if c["next_earnings"]}), 3)
 

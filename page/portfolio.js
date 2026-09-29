@@ -79,6 +79,38 @@ function renderExposure(){
       : '');
 }
 
+/* Where what is held leans on the rating's four themes (rating.tilt): the holdings' average place on each, weighted by
+   what is held. A fact about the holdings, not a signal: no verdict, no colour for good or bad. */
+function renderTilt(){
+  const T = DATA.tilt;
+  $('tiltCard').hidden = !DATA.connected || !T;
+  if (!T) return;
+  if (T.why){
+    $('tiltSub').textContent = '';
+    $('tiltBody').innerHTML = '<div class="co-note faint">Not shown: ' + esc(sentence(T.why)) + '</div>';
+    return;
+  }
+  /* not a rate: a census of the holdings, each one counted */
+  $('tiltSub').textContent = T.rated + ' of ' + T.held + (T.held === 1 ? ' holding is' : ' holdings are') + ' rated, ' +
+    pct1(T.share) + ' of the account';
+  const R = DATA.rating || {};
+  /* not a rate: a share of money, measured in full, not a count of cases */
+  const row = t => '<div class="ex-row"><div class="ex-top"><span class="ex-nm">' + esc(t.theme) + '</span>' +
+    '<span class="num">' + (t.place == null ? 'not ranked yet' : Math.round(t.place) + ' · ' + t.companies +
+      (t.companies === 1 ? ' company' : ' companies') + ', ' + pct1(t.share) + ' of the account') + '</span></div>' +
+    (t.place == null ? '' : '<div class="wbar tilt"><span class="track"><span class="fill" style="width:' +
+      Math.max(0, Math.min(100, t.place)).toFixed(1) + '%"></span><span class="mid" style="left:' + T.middle.toFixed(1) + '%"></span></span></div>') +
+    '</div>';
+  $('tiltBody').innerHTML = T.themes.map(row).join('') +
+    '<p class="co-note faint" style="margin-top:12px">Each bar is the holdings&rsquo; average place among the companies the rating ranks; the tick is the middle, ' +
+    Math.round(T.middle) + '. A fund holds many companies and the desk does not see inside it, so funds and shares listed outside the US are left out. ' +
+    'This describes what is held. It is not a signal to buy or sell.</p>' +
+    about('<p>The rating places each company on four themes of published findings' + (R.theme_source ? ' (' + esc(R.theme_source) + ')' : '') +
+      ': ' + esc((R.themes || []).join(', ')) + '. A company&rsquo;s place on a theme is the average of its measures&rsquo; places. ' +
+      'Here each is weighted by how much of the account is in that company, over the rated companies that have that theme. ' +
+      'A place is where a company stands today among the companies ranked; it is not a forecast.</p>', 'How this is worked out');
+}
+
 /* Every charge on every fill, by kind, and the tax withheld from dividends (build_costs),
    with their share of what investing earned before them. */
 function renderCosts(){

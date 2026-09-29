@@ -91,6 +91,12 @@ No study promises a return, and the most careful ones say the edges are small.
 | The S&P 500 with the same money on the same days | A plain comparison: SPY's total return |
 | History's rebuilt years used while today's rebuild ties to the broker's total within 1% | The desk's choice, a check on the data, not a finding |
 | The performance chart: one point a week (`history.CURVE_STEP_DAYS`), the last point the broker's own total; weeks with no close left out, and the line withheld if more than a fifth are (`CURVE_MOST_SKIPPED`) | The desk's choice, a display resolution and a guard, not a finding. It is drawn only while History's check above passes |
+| How rough the ride was: a week's return by Modified Dietz, what was put in counted for half the week (`history.RISK_FLOW_WEIGHT`), applied to the account and to the S&P 500 with the same deposits alike | Bank Administration Institute (1968), a method the GIPS standards allow; half a week is the average for a deposit on an unknown day |
+| A week with more than half the account put in at once is left out of the swing and the beta (`history.RISK_MAX_FLOW`) | The desk's choice: the half-week assumption matters most there. A test against the simulation's daily truth keeps the two within a hundredth |
+| At least 52 whole weeks before the swing, worst fall or beta is shown (`history.RISK_MIN_WEEKS`) | The desk's choice: a year. With fewer, the beta's interval is too wide to say anything |
+| Weekly swing made a year's by the square root of the weeks in a year | The usual convention, exact for independent weekly returns; a description, not a forecast |
+| The beta and its interval: a least-squares slope with Student's t on n − 2 degrees of freedom (`uncertainty.slope`, `t_quantile`) | Standard regression; the t series is Abramowitz & Stegun (1964) 26.7.5, checked in the tests against the published table |
+| What the holdings lean toward: each theme's place averaged by value held (`rating.tilt`) | A description of the holdings under the rating's own places, not a finding and not a signal; the middle is 50 by how places are made |
 
 ## Checks on the data, the desk's own tolerances
 

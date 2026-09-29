@@ -656,8 +656,8 @@
   .perf .fill-a{stop-color:var(--accent);}
   .perf .area{fill:url(#perfFill);stroke:none;}
   .perf .line-a{fill:none;stroke:var(--accent);stroke-width:2.6;stroke-linejoin:round;stroke-linecap:round;}
-  .perf .line-a.draw{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);animation:draw 1s ease-out .05s forwards;}
-  @keyframes draw{to{stroke-dashoffset:0;}}
+  .perf .line-a.draw{stroke-dasharray:var(--len);animation:draw 1s ease-out .05s backwards;}      /* hidden only while it runs: with motion off the line is just drawn */
+  @keyframes draw{from{stroke-dashoffset:var(--len);}to{stroke-dashoffset:0;}}
   .perf .line-m{fill:none;stroke:var(--ink-muted);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;}
   .perf .line-n{fill:none;stroke:var(--ink-faint);stroke-width:1.5;stroke-dasharray:4 4;}
   .perf .cur-x{stroke:var(--border-strong);stroke-width:1;}
@@ -705,3 +705,5 @@
   }
   @media (prefers-reduced-motion:reduce){ .jump-box{animation:none;} }
   .jump-box input:focus{box-shadow:none;}
+  .wbar.tilt .track{position:relative;}
+  .wbar.tilt .mid{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--ink-muted);}

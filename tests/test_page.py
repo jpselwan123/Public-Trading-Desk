@@ -124,6 +124,16 @@ class SuiteTests(unittest.TestCase):
     """K-06: "Ran 447 tests ... OK" means the same on every machine. No test skips —
     a check that cannot run here fails and says what is missing."""
 
+
+    def test_the_suite_cannot_reach_the_network(self):
+        """A test that asks a host outside this machine fails, and past any `except Exception` that would have hidden it."""
+        import http.client
+        for make in (lambda: http.client.HTTPSConnection("www.sec.gov"),
+                     lambda: (lambda c: (c.set_tunnel("www.sec.gov"), c)[1])(http.client.HTTPSConnection("127.0.0.1", 9))):
+            with self.assertRaises(NetworkInATest):
+                make().connect()
+        with self.assertRaises(OSError):                                  # this machine is still allowed: nothing listens on 9
+            http.client.HTTPConnection("127.0.0.1", 9, timeout=1).connect()
     def test_no_test_can_skip(self):
         folder = os.path.join(ROOT, "tests")
         found = []
@@ -1159,6 +1169,53 @@ class IntervalPageTests(unittest.TestCase):
         self.assertIsNone(empty["vs_market"])
         self.assertIsNone(forecasts.beat_record([]))
         self.assertNotIn("sells_gain", build_desk.build_trades([], {}))
+
+
+class PerformanceChartTests(unittest.TestCase):
+    """The Overview's weekly line (page/curve.js): its scale and ranges run for real, and the ways it can go quietly
+    wrong (a line that vanishes with motion turned off, one that redraws itself at every refresh) are pinned."""
+
+    def head(self):
+        code = read(os.path.join(ROOT, "page", "curve.js"))
+        return code[:code.index("function drawCurve(")]                   # the constants and the pure helpers only
+
+    def evaluate(self, body):
+        return run_javascript(self.head() + "\nconst __out = (" + body + ");\n"
+                              "(typeof process !== 'undefined') ? console.log(JSON.stringify(__out)) : JSON.stringify(__out);")
+
+    def test_the_scale_steps_are_round_numbers_about_a_quarter_of_the_span(self):
+        got = json.loads(self.evaluate("[1800, 18000, 7, 100, 96, 250000, 0.3].map(s => curveStep(s, 4))"))
+        self.assertEqual(got, [500, 5000, 2, 25, 25, 100000, 0.1])
+
+    def test_a_range_starts_on_the_first_week_inside_it(self):
+        days = [(date(2024, 1, 5) + timedelta(days=7 * i)).isoformat() for i in range(120)]      # to 2026-04-24
+        program = ("(() => { const C = {days: %s}; const out = {}; "
+                   "for (const r of ['3M', '1Y', 'All']){ curveRange = r; out[r] = curveFrom(C); } "
+                   "curveRange = '3M'; out.short = curveFrom({days: %s}); return out; })()"
+                   % (json.dumps(days), json.dumps(days[:5])))
+        got = json.loads(self.evaluate(program))
+        last = date.fromisoformat(days[-1])
+        for name, span in (("3M", 91), ("1Y", 365)):
+            cut = (last - timedelta(days=span)).isoformat()
+            self.assertGreaterEqual(days[got[name]], cut, name)                # the first week shown is on or after the cut...
+            self.assertLess(days[got[name] - 1], cut, name)                    # ...and the week before it is not
+        self.assertEqual(got["All"], 0)
+        self.assertLessEqual(got["short"], 2)                          # never fewer than three weeks to draw
+
+    def test_the_line_shows_with_motion_off_and_draws_itself_in_only_once(self):
+        css, code = read(os.path.join(ROOT, "page", "desk.css")), read(os.path.join(ROOT, "page", "curve.js"))
+        rule = re.search(r"\.perf \.line-a\.draw\{([^}]*)\}", css).group(1)
+        self.assertNotIn("stroke-dashoffset", rule)                    # a hidden start outside the animation stays hidden when it is off
+        self.assertIn("@keyframes draw{from{stroke-dashoffset:var(--len);}to{stroke-dashoffset:0;}}", css)
+        self.assertIn("animation:none!important", css.split("prefers-reduced-motion:reduce", 1)[1][:120])
+        self.assertIn("drawCurve(!curveDrawn)", code)                  # a refresh every half hour must not replay it
+        self.assertIn("curveDrawn = true;", code)
+        self.assertIn("box.hidden = !DATA.connected || !C || (!has && !C.why);", code)     # a new account leaves no blank gap
+        self.assertIn("if (hi <= lo) hi = lo + step;", code)           # an account that was empty all along still has a scale
+        self.assertNotRegex(code, r"#[0-9a-fA-F]{3,8}\b|rgba?\(")     # no colour typed in: the styles name them
+
+    def test_the_quick_jump_leaves_an_open_dialog_its_keys(self):
+        self.assertIn("document.querySelector('dialog[open]')", read(os.path.join(ROOT, "page", "palette.js")))
 
 
 class QuickJumpTests(unittest.TestCase):

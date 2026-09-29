@@ -12,6 +12,28 @@ import analysts, asof, t212, backtest, brief, bridge, build_desk, context, diffs
 import phone_bundle  # noqa: E402
 
 
+class NetworkInATest(BaseException):
+    """Raised, past every `except Exception`, when a test reaches for a host outside this machine."""
+
+
+def _keep_the_suite_off_the_network():
+    """Three tests once asked the real SEC for a Form 4 (they gave the refresh a fake feed but not a fake text
+    fetch) and passed whether it answered or not. A connection to anything but this machine now fails the
+    test that made it, or the run: a tunnel through a proxy is judged by the host it is asked to reach."""
+    import http.client
+    connect = http.client.HTTPConnection.connect
+
+    def guarded(self):
+        host = getattr(self, "_tunnel_host", None) or self.host
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            raise NetworkInATest(f"a test asked the network for {host}: give it a stand-in")
+        return connect(self)
+    http.client.HTTPConnection.connect = guarded
+
+
+_keep_the_suite_off_the_network()
+
+
 def read(path):
     with open(path) as f:
         return f.read()

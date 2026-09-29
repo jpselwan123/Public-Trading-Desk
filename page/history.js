@@ -67,3 +67,38 @@ function renderHistory(){
     '<div class="co-note faint">Closed gain is ' + ((DATA.broker || {}).states_gains ? esc(brokerName()) + '&rsquo;s own figure'
       : 'worked out by the desk, as Trading 212 states it,') + ' on each sale, against your average cost.</div>';
 }
+
+/* ---------------- how rough the ride was (history.risk) ----------------
+   Three plain figures over the weekly line, each beside the S&P 500's over the same weeks. Nothing here is a threshold
+   and no figure is coloured as good or bad. A figure history.py could not stand behind says why, in its words. */
+function renderRisk(){
+  const H = DATA.history, R = H && H.risk;
+  $('riskCard').hidden = !R || !!DATA.as_of;                       // a past day has no weekly line to speak of: the years above say why
+  if (!R || DATA.as_of) return;
+  if (R.why){
+    $('riskSub').textContent = '';
+    $('riskBody').innerHTML = '<div class="co-note faint">Not shown: ' + esc(sentence(R.why)) + '</div>';
+    return;
+  }
+  $('riskSub').textContent = R.weeks.toLocaleString() + ' whole weeks, ' + fmtDay(R.since) + ' to ' + fmtDay(R.until);
+  const F = R.fall, A = F.account, M = F.market, B = R.beta;
+  const n2 = v => (v < 0 ? '−' : '') + Math.abs(v).toFixed(2);            // the page's minus, not a hyphen
+  const fall = f => f.depth > 0 ? '−' + (f.depth * 100).toFixed(1) + '%' : 'none';
+  const when = f => f.depth > 0 ? fmtDay(f.peak) + ' to ' + fmtDay(f.trough) + (f.back ? ', back to that level ' + fmtDay(f.back) : ', not back to that level yet') : 'never below an earlier week';
+  const stat = (k, v, sub) => '<div class="stat"><div class="k">' + k + '</div><div class="v">' + v + '</div><div class="sv2">' + sub + '</div></div>';
+  $('riskBody').innerHTML = '<div class="stats">' +
+    stat('Worst fall', fall(A), esc(when(A)) + '<br>S&amp;P 500, same weeks: ' + fall(M) + ' (' + esc(when(M)) + ')') +
+    stat('Weekly swing, as a year', (R.swing.account * 100).toFixed(1) + '%', 'S&amp;P 500, same weeks: ' + (R.swing.market * 100).toFixed(1) + '%') +
+    stat('Moves with the S&amp;P 500', n2(B.slope), esc(B.level) + ' range ' + n2(B.low) + ' to ' + n2(B.high) +
+         (B.explained == null ? '' : '<br>it explains ' + Math.round(B.explained * 100) + '% of the weekly moves')) +
+    '</div>' +
+    about('<p>Each week&rsquo;s return is the change in the account&rsquo;s value, less what was put in that week, over its value at the start ' +
+      'plus what was put in, counted at ' + pct(R.flow_weight) + ' (Modified Dietz, a method the GIPS standards allow): a deposit lands on some day of the week, ' +
+      'and that is the average share of it that was there. The S&amp;P 500 is the same money in the same index, treated the same way. Only whole weeks count, ' +
+      'and a week whose deposits come to more than ' + pct(R.max_flow) + ', against its opening value, is left out, since the assumption matters most there.</p>' +
+      '<p><b>Worst fall</b> is the deepest drop from a high to a later low in the weekly values; a fall inside a week is not seen. ' +
+      '<b>Weekly swing</b> is the spread of the weekly returns, scaled to a year the usual way. <b>Moves with the S&amp;P 500</b> is the slope ' +
+      'from the account&rsquo;s weekly returns against the S&amp;P 500&rsquo;s (a beta): 1 moves with it, 0.5 half as much, 0 not with it at all; ' +
+      'the range is Student&rsquo;s t. These describe the weeks that were. They say nothing about which was better, and nothing about the weeks to come.</p>',
+      'How these are worked out');
+}

@@ -33,6 +33,11 @@ UNIVERSE = [
     ("TSLA_US_EQ", "Tesla", 190.0, 0.05, 0.60, 0.0),
     ("PYPL_US_EQ", "PayPal", 75.0, -0.08, 0.40, 0.0),
 ]
+# How closely each line's daily moves follow the market's, in the order of UNIVERSE (the demo's invented lines take the
+# place of the real ones and keep their loading): the S&P 500 fund almost wholly, the other funds much, a share about half.
+# The market's own draws come from a stream apart, so the account's random sequence, and every trade in it, is unchanged.
+MARKET_LOADING = (0.99, 0.85, 0.60, 0.65, 0.55, 0.60, 0.35, 0.35, 0.75, 0.45, 0.40)
+MARKET_SEED = 2125
 FEE_RATE = 0.0015           # currency-conversion style fee on each fill
 
 # The demo's companies: invented, so nothing shown for them is a real company's figure or a real
@@ -72,12 +77,22 @@ def walks(rnd, today, universe=None):
     """The first day and each line's daily price walk {ticker: {day: price}}, weekends at
     Friday's price. Drawn first from the account's own random sequence."""
     start = today - timedelta(days=int(365 * 2.6))
+    market = random.Random(MARKET_SEED)
+    common = {}                                      # the market's move each weekday, shared by every line
+    d = start
+    while d <= today:
+        if d.weekday() < 5:
+            common[d] = market.gauss(0, 1)
+        d += timedelta(days=1)
     prices = {}
-    for t, _, p0, mu, vol, _ in universe or UNIVERSE:
+    for i, (t, _, p0, mu, vol, _) in enumerate(universe or UNIVERSE):
+        loading = MARKET_LOADING[i]
         p, series, d = p0, {}, start
         while d <= today:
             if d.weekday() < 5:
-                p *= math.exp((mu - vol * vol / 2) / 252 + vol / math.sqrt(252) * rnd.gauss(0, 1))
+                own = rnd.gauss(0, 1)
+                move = loading * common[d] + math.sqrt(1 - loading * loading) * own
+                p *= math.exp((mu - vol * vol / 2) / 252 + vol / math.sqrt(252) * move)
             series[d] = p
             d += timedelta(days=1)
         prices[t] = series

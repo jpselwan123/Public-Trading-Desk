@@ -309,6 +309,11 @@ Six tabs with hash routing (`TABS` in the template), each one subject:
   (`history.curve`, drawn by `page/curve.js` in plain SVG, no library and no request). It comes from the same rebuild
   and only while it ties to the broker's total; the last point is the broker's own figure; a week without a close is
   left out and the line is withheld, with its reason, if more than a fifth are.
+- **History's risk card** (`history.risk`, `uncertainty.slope`): the worst fall, the weekly swing and the beta of the account beside the
+  S&P 500's over the same whole weeks of the Overview's line, each week's return by Modified Dietz with the deposits taken out; withheld,
+  with its reason, under a year of weeks. **Portfolio's lean** (`rating.tilt`): the rating's four theme places averaged by value held.
+  Both describe; neither is coloured as good or bad or worded as advice. `doctor.py` says whether the weekly line and the risk figures
+  can be drawn, by count and category, never by amount.
 - **Quick jump** (`page/palette.js`, Ctrl/⌘+K or "/"): tabs, sections, companies and the two refresh buttons. It moves
   about the page and sends nothing (`QuickJumpTests`).
 - **Companies:** a follow box and one sortable table of every company covered (price, the last

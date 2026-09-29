@@ -3,7 +3,7 @@
 // would be worth in the S&P 500 on that day. Drawn here and worked out nowhere here; no colour is typed
 // in this file (the styles name them), and the words, not a colour, say ahead or behind.
 const CURVE_RANGES = [['3M', 91], ['1Y', 365], ['All', null]];     // what the range buttons show, in days
-let curveRange = 'All';
+let curveRange = 'All', curveDrawn = false, curveAnimating = 0;                          // the line draws itself in once, and again on a new range; a refresh redraws it still
 function curveStep(span, n){
   const raw = span / n, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
@@ -22,6 +22,9 @@ function curveFrom(C){
 function curveSpanDays(C){ return (Date.parse(C.days[C.days.length - 1]) - Date.parse(C.days[0])) / 864e5; }
 
 function drawCurve(animate){
+  // the first draw that finds room animates (the page draws before the Overview is on show, so that is often the resize's), and a
+  // redraw to a new width in the first second carries the draw-in on
+  animate = animate || !curveDrawn || performance.now() < curveAnimating;
   const C = (DATA.history || {}).curve, host = $('perfPlot');
   if (!host || !C || !C.days || C.days.length < 4 || !host.clientWidth) return;
   const W = Math.round(host.clientWidth), H = W < 520 ? 220 : 300, L = 6, R = 6, T = 14, B = 30, cur = C.currency || 'USD';
@@ -31,6 +34,7 @@ function drawCurve(animate){
   let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
   const step = curveStep((hi - lo) || hi || 1, 4);
   lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+  if (hi <= lo) hi = lo + step;                                    // an account that was empty all along still has a scale
   const xs = t.map(v => L + (t1 === t0 ? 0 : (v - t0) / (t1 - t0)) * (W - L - R));
   const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
   const line = vals => vals.map((v, i) => v == null ? '' : ((i && vals[i - 1] != null ? 'L' : 'M') + xs[i].toFixed(1) + ',' + y(v).toFixed(1))).join('');
@@ -93,13 +97,15 @@ function drawCurve(animate){
     else if (ev.key === 'Escape'){ cursor.hidden = true; tip.hidden = true; }
   };
   host.dataset.width = W;
+  curveDrawn = true;
+  if (animate && !(performance.now() < curveAnimating)) curveAnimating = performance.now() + 1100;
 }
 
 function renderPerformance(){
   const C = (DATA.history || {}).curve, box = $('perf');
   if (!box) return;
   const has = !!(DATA.connected && C && C.days && C.days.length > 3);
-  box.hidden = !DATA.connected || !C;
+  box.hidden = !DATA.connected || !C || (!has && !C.why);            // a new account has too few weeks to draw, and nothing to say about it
   $('perfHead').hidden = $('perfPlot').hidden = !has;
   $('perfWhy').textContent = DATA.connected && C && C.why ? 'The account’s weekly line is not drawn: ' + sentence(C.why) : '';
   if (!has) return;
@@ -112,7 +118,7 @@ function renderPerformance(){
   $('perfLegend').innerHTML = '<span class="lg"><span class="sw a"></span>You</span>' +
     (market ? '<span class="lg"><span class="sw m"></span>S&amp;P 500, same deposits</span>' : '') +
     '<span class="lg"><span class="sw n"></span>Put in</span>';
-  drawCurve(true);
+  drawCurve(!curveDrawn);
 }
 $('perfRange').addEventListener('click', ev => {
   const b = ev.target.closest('[data-range]');

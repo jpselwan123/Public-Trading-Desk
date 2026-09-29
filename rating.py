@@ -441,6 +441,32 @@ def for_page(ratings, ticker, us_line=True):
     return {"label": None, "why_not": WHY_NOT[(ratings.get("why_not") or {}).get(ticker, "absent")]}
 
 
+PLACE_MIDDLE = 50.0         # a place runs 0 to 100 among the companies ranked; this is the middle of them
+
+
+def tilt(rows, total):
+    """Where the account leans on the rating's four themes: for each, the places of the rated companies held
+    (each company's average over that theme's measures, 0 to 100) averaged by what is held in each, with how many
+    companies it rests on and how much of the account they are. A fact about what is held, not a signal:
+    a fund holds many companies and the desk does not see inside it, and a company listed outside the US has
+    no rating, so both are left out and their share of the account is what `share` leaves unsaid.
+    {"themes", "held", "rated", "share", "middle"}, or {"why": ...}."""
+    if not total or total <= 0:
+        return {"why": "the account's value is not known"}
+    rated = [r for r in rows or [] if (r.get("rating") or {}).get("themes") and (r.get("value") or 0) > 0]
+    if not rated:
+        return {"why": "none of the companies held is rated: the rating covers US-listed companies, "
+                       "so a fund or a share listed elsewhere has none"}
+    themes = []
+    for theme in THEMES:
+        have = [r for r in rated if r["rating"]["themes"].get(theme) is not None]
+        weight = sum(r["value"] for r in have)
+        themes.append({"theme": theme, "companies": len(have), "share": weight / total,
+                       "place": sum(r["value"] * r["rating"]["themes"][theme] for r in have) / weight if weight else None})
+    return {"themes": themes, "held": len(rows), "rated": len(rated),
+            "share": sum(r["value"] for r in rated) / total, "middle": PLACE_MIDDLE}
+
+
 def explained(ratings):
     """What the page needs to say how any rating was made: the factors, the cut-offs,
     the count it was ranked among — each once, from here."""

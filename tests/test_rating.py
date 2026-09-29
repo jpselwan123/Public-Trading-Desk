@@ -545,3 +545,49 @@ class EvidenceRegisterTests(unittest.TestCase):
         self.assertIn(f"`{rating.METHOD}`", text)
         for name, spec in screen.PRESETS.items():
             self.assertIn(spec["name"].split(" (")[0], text, name)
+
+
+class TiltTests(unittest.TestCase):
+    """rating.tilt: where the holdings lean on the four themes, worked by hand. A fact about what is held, never a signal."""
+
+    THEMES = {"Value": 80.0, "Momentum": 40.0, "Quality": 60.0, "Accruals": 50.0}
+
+    def rows(self):
+        return [{"ticker": "AAA", "value": 6000.0, "rating": {"label": "Buy", "themes": dict(self.THEMES)}},
+                {"ticker": "BBB", "value": 2000.0, "rating": {"label": "Sell", "themes": {"Value": 20.0, "Quality": 30.0, "Accruals": 90.0}}},
+                {"ticker": "FUND", "value": 1500.0, "rating": {"label": None, "why_not": "not a company"}},
+                {"ticker": "ZERO", "value": 0.0, "rating": {"label": "Hold", "themes": dict(self.THEMES)}}]
+
+    def test_each_theme_is_the_holdings_average_place_weighted_by_value(self):
+        t = rating.tilt(self.rows(), 10000.0)
+        by = {x["theme"]: x for x in t["themes"]}
+        self.assertEqual([x["theme"] for x in t["themes"]], list(rating.THEMES))
+        self.assertAlmostEqual(by["Value"]["place"], (6000 * 80 + 2000 * 20) / 8000)             # 65
+        self.assertAlmostEqual(by["Quality"]["place"], (6000 * 60 + 2000 * 30) / 8000)            # 52.5
+        self.assertAlmostEqual(by["Accruals"]["place"], (6000 * 50 + 2000 * 90) / 8000)           # 60
+        self.assertEqual((by["Momentum"]["place"], by["Momentum"]["companies"]), (40.0, 1))       # only AAA has it
+        self.assertAlmostEqual(by["Momentum"]["share"], 0.6)
+        self.assertAlmostEqual(by["Value"]["share"], 0.8)
+        self.assertEqual((t["held"], t["rated"]), (4, 2))                                          # the fund and the empty line are not rated holdings
+        self.assertAlmostEqual(t["share"], 0.8)
+        self.assertEqual(t["middle"], rating.PLACE_MIDDLE)
+
+    def test_a_theme_nobody_held_has_no_place_and_nothing_rated_says_why(self):
+        rows = [{"ticker": "AAA", "value": 100.0, "rating": {"themes": {"Value": 10.0, "Quality": 20.0, "Accruals": 30.0}}}]
+        got = {x["theme"]: x for x in rating.tilt(rows, 100.0)["themes"]}
+        self.assertIsNone(got["Momentum"]["place"])
+        self.assertEqual((got["Momentum"]["companies"], got["Momentum"]["share"]), (0, 0.0))
+        for rows, total in (([{"ticker": "F", "value": 5.0, "rating": {"label": None}}], 100.0), ([], 100.0), (None, 100.0)):
+            self.assertIn("none of the companies held is rated", rating.tilt(rows, total)["why"])
+        self.assertIn("not known", rating.tilt(self.rows(), None)["why"])
+        self.assertIn("not known", rating.tilt(self.rows(), 0)["why"])
+
+    def test_the_page_says_it_describes_and_never_advises(self):
+        body = template_function("renderTilt")
+        self.assertIn("$('tiltCard').hidden = !DATA.connected || !T;", body)
+        self.assertIn("esc(sentence(T.why))", body)
+        self.assertIn("T.middle", body)                          # the middle is the rating's, not typed here
+        self.assertIn("not a signal to buy or sell", body)
+        self.assertNotRegex(body, r"\bshould\b|critical|--warn")
+        self.assertIn("'renderTilt'", template_function("renderAll"))
+        self.assertIn('id="tiltCard"', page_source())

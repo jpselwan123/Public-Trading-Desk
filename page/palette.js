@@ -60,6 +60,7 @@ function jumpGo(i){
   jumpClose(); row.go();
 }
 document.addEventListener('keydown', e => {
+  if (document.querySelector('dialog[open]')) return;              // a dialog is in front: its keys are its own
   const typing = /^(input|textarea|select)$/i.test((e.target.tagName || '')) || e.target.isContentEditable;
   if ((e.key === 'k' || e.key === 'K') && (e.metaKey || e.ctrlKey)){ e.preventDefault(); $('jump').hidden ? jumpOpen() : jumpClose(); return; }
   if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey && !e.altKey && $('jump').hidden){ e.preventDefault(); jumpOpen(); return; }

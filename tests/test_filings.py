@@ -86,7 +86,7 @@ class NewsTests(unittest.TestCase):
         self.assertIn("stored=build_desk.load_json", inspect.getsource(server.Handler.update_research))
 
     def test_refresh_keeps_recent_filings_only(self):
-        out = news.refresh(["nvda"], ua="test", fetch=self.fake_fetch, today=date(2026, 9, 21))
+        out = news.refresh(["nvda"], ua="test", fetch=self.fake_fetch, today=date(2026, 9, 21), get_text=lambda *a, **k: "")
         self.assertEqual(out["tickers"], ["NVDA"])
         self.assertEqual([i["form"] for i in out["items"]], ["8-K", "4", "10-Q"])   # 2020 one dropped
         first = out["items"][0]
@@ -96,7 +96,7 @@ class NewsTests(unittest.TestCase):
         self.assertEqual(out["unknown"], [])
 
     def test_unknown_ticker_is_reported_not_crashing(self):
-        out = news.refresh(["NVDA", "NOTREAL"], ua="test", fetch=self.fake_fetch, today=date(2026, 9, 21))
+        out = news.refresh(["NVDA", "NOTREAL"], ua="test", fetch=self.fake_fetch, today=date(2026, 9, 21), get_text=lambda *a, **k: "")
         self.assertEqual(out["unknown"], ["NOTREAL"])
         self.assertTrue(out["items"])
 
@@ -270,7 +270,7 @@ class NewsTests(unittest.TestCase):
         self.assertEqual(next(i for i in out["items"] if i["form"] == "4")["label"], "Insider trade")
 
     def test_page_marks_held_tickers(self):
-        out = news.refresh(["NVDA"], ua="test", fetch=self.fake_fetch, today=date(2026, 9, 21))
+        out = news.refresh(["NVDA"], ua="test", fetch=self.fake_fetch, today=date(2026, 9, 21), get_text=lambda *a, **k: "")
         raw = generate_demo_data.generate(TODAY)
         d = build_desk.compute(raw, {}, TODAY, news=out)
         self.assertEqual(d["news"]["count"], 3)

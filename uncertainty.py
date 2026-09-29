@@ -25,6 +25,12 @@ binomial test, so the two statements that share a line on a card ("the median mo
               is the interval the sign test inverts, so "the median is below zero"
               holds exactly when "fewer than half went up" does.
 
+One more, for a slope rather than a count: slope(), the ordinary least-squares line
+through paired numbers with its interval (the account's weekly moves against the S&P
+500's give its beta). The interval uses Student's t, whose quantile is t_quantile()'s
+series (Abramowitz & Stegun 1964, 26.7.5), checked in the tests against the published
+table; the residuals are taken as independent, which weekly returns roughly are.
+
 Below SMALLEST (6 at 95%) no result, however lopsided, can be told from an even
 split: even 5 of 5 has a 1-in-16 chance. That is where a median cannot be bounded
 at all, and where every interval here reads "uncertain". It is derived from the
@@ -229,3 +235,36 @@ def difference(k1, n1, k2, n2, confidence=CONFIDENCE):
            "high": d + math.sqrt((u1 - p1) ** 2 + (p2 - l2) ** 2),
            "n": n1 + n2, "confidence": confidence, "level": level_text(confidence)}
     return _reads(out, 0.0)
+
+
+def t_quantile(df, confidence=CONFIDENCE):
+    """Student's t for a two-sided interval at `confidence` with `df` degrees of freedom: the series in
+    1/df from the normal quantile (Abramowitz & Stegun 1964, 26.7.5), good to four places from df = 10.
+    None below that, where the series is not to be trusted."""
+    if df < 10:
+        return None
+    z = statistics.NormalDist().inv_cdf(0.5 + confidence / 2)
+    return (z + (z ** 3 + z) / (4 * df)
+            + (5 * z ** 5 + 16 * z ** 3 + 3 * z) / (96 * df ** 2)
+            + (3 * z ** 7 + 19 * z ** 5 + 17 * z ** 3 - 15 * z) / (384 * df ** 3))
+
+
+def slope(xs, ys, confidence=CONFIDENCE):
+    """The least-squares line y = a + b x through the pairs: {"slope", "low", "high", "explained", "n"}, where
+    `explained` is r squared, the share of y's movement the line accounts for. None with fewer than 12 pairs
+    (10 degrees of freedom, t_quantile's floor) or when x never varies."""
+    n = len(xs)
+    if n != len(ys) or n < 12:
+        return None
+    mx, my = sum(xs) / n, sum(ys) / n
+    sxx = sum((x - mx) ** 2 for x in xs)
+    if sxx <= 0:
+        return None
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    syy = sum((y - my) ** 2 for y in ys)
+    b = sxy / sxx
+    residual = max(syy - b * sxy, 0.0)
+    half = t_quantile(n - 2, confidence) * math.sqrt(residual / (n - 2) / sxx)
+    return {"slope": b, "low": b - half, "high": b + half, "n": n,
+            "explained": (sxy * sxy / (sxx * syy)) if syy > 0 else None,
+            "confidence": confidence, "level": level_text(confidence)}

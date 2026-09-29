@@ -6,6 +6,7 @@ from support import *  # noqa: F401,F403
 import copy
 import types
 import math
+import statistics
 
 import checks
 import history
@@ -397,6 +398,31 @@ class StatisticsReferenceTests(unittest.TestCase):
             self.assertAlmostEqual(q[i], w, places=6)
         self.assertAlmostEqual(uncertainty.family_level(ps), 1 - 1 * 0.05 / 15)       # one declared at 5%
 
+    def test_students_t_is_the_published_table(self):
+        """Two-sided 95% (and one 99%) points from the standard t table (NIST/SEMATECH e-Handbook, 1.3.6.7.2)."""
+        for df, level, want in ((10, .95, 2.22814), (12, .95, 2.17881), (24, .95, 2.06390), (50, .95, 2.00856),
+                                (100, .95, 1.98397), (200, .95, 1.97190), (30, .99, 2.75000)):
+            self.assertAlmostEqual(uncertainty.t_quantile(df, level), want, delta=3e-4, msg=(df, level))
+        self.assertIsNone(uncertainty.t_quantile(9))                    # below the series' floor: no interval
+
+    def test_the_slope_and_its_interval_are_an_exact_fraction_calculation(self):
+        """x = 1..12 against y read to a tenth; the slope, r squared and the interval worked with fractions apart from
+        the desk's code (normal equations, t = 2.22814 for ten degrees of freedom)."""
+        ys = [2.1, 3.9, 6.2, 7.8, 10.1, 12.2, 13.8, 16.1, 18.0, 20.2, 21.9, 24.1]
+        got = uncertainty.slope(list(range(1, 13)), ys)
+        self.assertAlmostEqual(got["slope"], 2.002097902, places=8)
+        self.assertAlmostEqual(got["explained"], 0.99957095, places=7)
+        self.assertAlmostEqual(got["low"], 1.972871529, delta=5e-5)
+        self.assertAlmostEqual(got["high"], 2.031324276, delta=5e-5)
+        self.assertEqual((got["n"], got["confidence"]), (12, 0.95))
+        exact = uncertainty.slope(list(range(1, 13)), [2 * x + 1 for x in range(1, 13)])
+        self.assertAlmostEqual(exact["slope"], 2.0, places=12)
+        self.assertAlmostEqual(exact["high"] - exact["low"], 0.0, places=9)
+        self.assertAlmostEqual(exact["explained"], 1.0, places=12)
+        self.assertIsNone(uncertainty.slope(list(range(11)), list(range(11))))          # too few pairs for the interval
+        self.assertIsNone(uncertainty.slope([1.0] * 20, list(range(20))))               # x never moves
+        self.assertIsNone(uncertainty.slope([1, 2, 3], [1, 2]))
+
     def test_the_money_weighted_return_is_excels_xirr(self):
         """Excel's XIRR example: 10,000 in, 2,750, 4,250 and 3,250 out, 2,750 left: 37.34% a year.
         More came out than went in, which had no return until 28 Sep 2026."""
@@ -425,6 +451,81 @@ class StatisticsReferenceTests(unittest.TestCase):
             got = build_desk.money_weighted_return(flows, balance, "2026-09-28")
             self.assertAlmostEqual(math.log1p(got["annual"]), daily * 365, places=9)
         self.assertIsNone(build_desk.money_weighted_return([("2026-01-02", -100.0)], 0.0, "2026-09-28"))
+
+
+class RiskTruthTests(unittest.TestCase):
+    """How rough the ride was (history.risk): the swing, the worst fall and the beta the Overview's weekly line gives,
+    against the same figures worked from the simulation's own daily values with the deposits taken out on their true
+    days (a time-weighted return), apart from the desk's weekly approximation (Modified Dietz)."""
+
+    def exact(self, L, curve):
+        days = curve["days"]
+        flows = {}
+        for f, a in L.flows:
+            flows[f] = flows.get(f, 0.0) + a
+        trading = [x.isoformat() for x in L.days]
+        value = {x.isoformat(): L.value_on(x) for x in L.days}
+
+        def account(d0, d1):
+            t0, t1 = (max(x for x in trading if x <= d) for d in (d0, d1))
+            span, growth = [x for x in trading if t0 <= x <= t1], 1.0
+            for a, b in zip(span, span[1:]):
+                growth *= (value[b] - sum(v for k, v in flows.items() if a < k <= b)) / value[a]
+            return growth - 1
+
+        unit = lambda day: L.spy_same_money([(L.flows[0][0], 1.0)], day)
+        weekly = [(account(days[i - 1], days[i]), unit(days[i]) / unit(days[i - 1]) - 1, i) for i in range(1, len(days))]
+        return weekly
+
+    def test_the_swing_the_fall_and_the_beta_match_the_daily_truth(self):
+        for seed, ccy in CASES:
+            with self.subTest(seed=seed, currency=ccy):
+                L = ledger.Ledger(seed, ccy)
+                d = build(L)
+                c, r = d["history"]["curve"], d["history"]["risk"]
+                self.assertNotIn("why", r)
+                weekly = self.exact(L, c)
+                whole = [(a, m) for a, m, i in weekly
+                         if (date.fromisoformat(c["days"][i]) - date.fromisoformat(c["days"][i - 1])).days == history.CURVE_STEP_DAYS
+                         and abs(c["net"][i] - c["net"][i - 1]) <= history.RISK_MAX_FLOW * c["account"][i - 1]]
+                self.assertEqual(r["weeks"], len(whole))
+                for who, k in (("account", 0), ("market", 1)):
+                    xs = [w[k] for w in whole]
+                    swing = statistics.stdev(xs) * math.sqrt(52)
+                    self.assertAlmostEqual(r["swing"][who], swing, delta=0.01 * swing, msg=who)
+                fit = uncertainty.slope([m for _, m in whole], [a for a, _ in whole])
+                self.assertAlmostEqual(r["beta"]["slope"], fit["slope"], delta=0.01)
+                self.assertAlmostEqual(r["beta"]["low"], fit["low"], delta=0.01)
+                self.assertAlmostEqual(r["beta"]["high"], fit["high"], delta=0.01)
+                self.assertAlmostEqual(r["beta"]["explained"], fit["explained"], delta=0.01)
+                # the worst fall: the chain of every week's true return, the deepest peak-to-trough
+                for who, k in (("account", 0), ("market", 1)):
+                    level, high, worst = 1.0, 1.0, 0.0
+                    for w in weekly:
+                        level *= 1 + w[k]
+                        high = max(high, level)
+                        worst = max(worst, 1 - level / high)
+                    self.assertAlmostEqual(r["fall"][who]["depth"], worst, delta=0.005, msg=who)
+                self.assertLessEqual(r["fall"]["account"]["peak"], r["fall"]["account"]["trough"])
+                self.assertEqual((r["since"], r["until"]), (c["days"][0], c["days"][-1]))
+
+
+    def test_the_health_report_says_whether_they_can_be_drawn_without_an_amount(self):
+        import doctor
+        L = ledger.Ledger(1, "USD")
+        raw = L.raw()
+        account = build_desk.build_account(raw["summary"], raw["positions"])
+        rows = dict(doctor.weekly_line(raw, account, L.prices(), L.end))
+        curve = build(L)["history"]["curve"]
+        self.assertEqual(rows["weekly"], f"drawn · {len(curve['days'])} weeks, 0 left out for want of a close")
+        self.assertRegex(rows["risk"], r"^shown · \d+ whole weeks$")
+        raw["summary"]["totalValue"] = float(raw["summary"]["totalValue"]) * 1.5            # a total the record cannot reach
+        broken = build_desk.build_account(raw["summary"], raw["positions"])
+        rows = dict(doctor.weekly_line(raw, broken, L.prices(), L.end))
+        self.assertIn("does not tie", rows["weekly"])
+        self.assertNotRegex(rows["weekly"], r"[$€£]|\d,\d{3}")
+        self.assertNotIn("risk", rows)
+        self.assertEqual(doctor.weekly_line({}, {}, {}, L.end), [("weekly", "no money put in yet")])
 
 
 class DispositionTruthTests(unittest.TestCase):

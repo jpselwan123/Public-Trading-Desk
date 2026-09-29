@@ -1331,6 +1331,8 @@ def compute(raw, journal=None, today=None, news=None, prices=None, fundamentals=
         "checks": checks_mod.checks(raw, account, prices, today) if not as_of else None,
         "digest": build_digest(raw, news, prices, ratings_log, positions, today, as_of, trades_data, looks),
         "exposure": build_exposure(positions, universe, codes, account),
+        # where what is held leans on the rating's four themes: a fact about the holdings, never a signal
+        "tilt": rating_mod.tilt(positions["rows"], account.get("total")),
         "costs": build_costs(raw.get("orders"), raw.get("dividends"), raw.get("transactions"), account, positions,
                              growth["investing"], prices),
         "positions": positions,

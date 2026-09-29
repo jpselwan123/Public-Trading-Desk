@@ -376,7 +376,29 @@ def account_checks(folder, today):
         return [("", "no account total to check against")]
     if made.get("none_because"):
         return [("", made["none_because"])]
-    return [(c["name"], ("agrees" if c["ok"] else "DOES NOT AGREE") + " · " + c["plain"]) for c in made["checks"]]
+    return ([(c["name"], ("agrees" if c["ok"] else "DOES NOT AGREE") + " · " + c["plain"]) for c in made["checks"]]
+            + weekly_line(raw, account, prices, today))
+
+
+def weekly_line(raw, account, prices, today):
+    """Whether the Overview's weekly line and the History's risk figures can be drawn, and how many weeks they rest
+    on: counts and a category only. The reason the page gives can carry an amount, so it is not repeated here."""
+    import history
+    try:
+        h = history.build(raw, account, prices, today)
+    except Exception as e:
+        return [("weekly", f"could not be worked out ({type(e).__name__})")]
+    if not h:
+        return [("weekly", "no money put in yet")]
+    curve, risk = h["curve"], h["risk"]
+    if "why" in curve:
+        check = h.get("check")
+        return [("weekly", "withheld · " + ("the rebuilt history does not tie to the account's total (History says by how much)"
+                                                 if check and not check["ok"] else "too many weeks without a close, or no total to check against"))]
+    rows = [("weekly", f"drawn · {len(curve['days'])} weeks, {curve['skipped']} left out for want of a close")]
+    rows.append(("risk", "withheld · fewer than %d whole weeks, or the S&P 500 did not move" % history.RISK_MIN_WEEKS
+                 if "why" in risk else f"shown · {risk['weeks']} whole weeks"))
+    return rows
 
 
 def account_source(folder):

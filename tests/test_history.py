@@ -2,6 +2,7 @@
 from support import *  # noqa: F401,F403
 import world
 import history
+import math
 
 
 def close(value):
@@ -257,3 +258,122 @@ class HistoryPageTests(unittest.TestCase):
         html = build_desk.render(d)
         self.assertIn('id="histBody"', html)
         self.assertIn('id="page-history"', html)
+
+
+class RiskByHandTests(unittest.TestCase):
+    """history.risk on weekly curves made up so the answer is known: the swing, the worst fall and the beta
+    are worked here with plain arithmetic, not read back from the desk."""
+
+    MARKET = [0.02, -0.01, 0.03, -0.02, 0.015, -0.005, 0.01, -0.03, 0.025, 0.0, -0.015, 0.02, 0.005]   # a repeating pattern
+
+    def weeks(self, n=60, start=date(2024, 1, 5)):
+        return [(start + timedelta(days=7 * i)).isoformat() for i in range(n)]
+
+    def curve(self, n=60, beta=1.5, flow=0.0, deposit_week=None, big=0.0, gap=None):
+        """`n` weeks: the market moves by MARKET's pattern, the account by `beta` times it, `flow` put in every week
+        (landing, in Dietz's sense, half way through it), so each week's return is exactly the pattern's."""
+        a, m, net = [1000.0], [1000.0], [1000.0]
+        for i in range(1, n):
+            r = self.MARKET[(i - 1) % len(self.MARKET)]
+            f = flow + (big if deposit_week == i else 0.0)
+            a.append(a[-1] + f + beta * r * (a[-1] + f / 2))
+            m.append(m[-1] + f + r * (m[-1] + f / 2))
+            net.append(net[-1] + f)
+        days = self.weeks(n)
+        if gap is not None:                       # a week with no close: dropped, its neighbours joined
+            for series in (days, a, m, net):
+                del series[gap]
+        return {"days": days, "account": a, "market": m, "net": net, "currency": "USD", "skipped": 0}
+
+    def swing(self, returns):
+        mean = sum(returns) / len(returns)
+        return math.sqrt(sum((x - mean) ** 2 for x in returns) / (len(returns) - 1)) * math.sqrt(52)
+
+    def test_an_account_that_moves_one_and_a_half_times_the_market_has_that_beta(self):
+        r = history.risk(self.curve())
+        pattern = [self.MARKET[i % len(self.MARKET)] for i in range(59)]
+        self.assertEqual(r["weeks"], 59)
+        self.assertAlmostEqual(r["beta"]["slope"], 1.5, places=9)
+        self.assertAlmostEqual(r["beta"]["explained"], 1.0, places=9)
+        self.assertAlmostEqual(r["beta"]["high"] - r["beta"]["low"], 0.0, places=6)     # a perfect fit leaves no doubt
+        self.assertAlmostEqual(r["swing"]["market"], self.swing(pattern), places=9)
+        self.assertAlmostEqual(r["swing"]["account"], 1.5 * self.swing(pattern), places=9)
+        self.assertEqual((r["since"], r["until"]), ("2024-01-05", self.weeks(60)[-1]))
+
+    def test_deposits_are_taken_out_of_every_weeks_return(self):
+        """$100 in every week on a growing account: the returns are still the pattern's exactly, not the pattern plus
+        what was put in. A week with a deposit over half its opening value is left out of the swing and the beta."""
+        r = history.risk(self.curve(flow=100.0))
+        pattern = [self.MARKET[i % len(self.MARKET)] for i in range(59)]
+        self.assertAlmostEqual(r["beta"]["slope"], 1.5, places=9)
+        self.assertAlmostEqual(r["swing"]["market"], self.swing(pattern), places=9)
+        big = history.risk(self.curve(big=5000.0, deposit_week=30))
+        self.assertEqual(big["weeks"], 58)                                  # the week of the $5,000 is not counted
+        self.assertAlmostEqual(big["beta"]["slope"], 1.5, places=6)         # and the rest are untouched
+
+    def test_a_week_with_no_close_is_not_a_two_week_return(self):
+        r = history.risk(self.curve(gap=20))
+        self.assertEqual(r["weeks"], 57)                                    # 59 returns, the joined fortnight not one of them
+        self.assertAlmostEqual(r["beta"]["slope"], 1.5, places=6)
+
+    def test_too_few_weeks_say_so_instead_of_a_number(self):
+        r = history.risk(self.curve(n=40))
+        self.assertEqual(list(r), ["why"])
+        self.assertIn(str(history.RISK_MIN_WEEKS), r["why"])
+        self.assertEqual(history.risk({"why": "the rebuild does not tie"}), {"why": "the rebuild does not tie"})
+        self.assertEqual(list(history.risk(None)), ["why"])
+
+    def test_the_reason_names_what_is_missing_in_plain_words(self):
+        two = {"days": ["2024-01-05", "2024-01-12"], "account": [100.0, 101.0], "market": [100.0, 101.0], "net": [100.0, 100.0]}
+        self.assertEqual(history.risk(two)["why"], "only 1 whole week is known, and it takes 52 (a year) to say anything about a swing")
+        none = dict(two, days=["2024-01-05", "2024-01-19"])                       # a fortnight is not a whole week
+        self.assertEqual(history.risk(none)["why"], "no whole week is known, and it takes 52 (a year) to say anything about a swing")
+        blind = dict(two, market=[None, None])
+        self.assertIn("closes are not stored", history.risk(blind)["why"])
+
+    def test_the_worst_fall_by_hand(self):
+        days = ["2024-01-05", "2024-01-12", "2024-01-19", "2024-01-26", "2024-02-02", "2024-02-09"]
+        values = [100.0, 120.0, 90.0, 95.0, 130.0, 104.0]
+        returns = [b / a - 1 for a, b in zip(values, values[1:])]
+        fall = history._worst_fall(days, returns)
+        self.assertAlmostEqual(fall["depth"], 0.25)                         # 120 down to 90
+        self.assertEqual((fall["peak"], fall["trough"], fall["back"]), ("2024-01-12", "2024-01-19", "2024-02-02"))
+        rising = history._worst_fall(days, [0.1] * 5)
+        self.assertEqual((rising["depth"], rising["back"]), (0.0, None))
+        never = history._worst_fall(days, [-0.1, -0.1, -0.1, 0.1, 0.1])
+        self.assertAlmostEqual(never["depth"], 1 - 0.9 ** 3)
+        self.assertIsNone(never["back"])                                    # 0.729 x 1.21 is 0.882: not back to 1
+        self.assertEqual(never["peak"], "2024-01-05")
+
+    def test_a_market_that_never_moves_cannot_be_set_against(self):
+        c = self.curve()
+        c["market"] = [1000.0] * len(c["days"])
+        c["net"] = [1000.0] * len(c["days"])
+        c["account"] = [1000.0 + 0.01 * i for i in range(len(c["days"]))]
+        self.assertEqual(list(history.risk(c)), ["why"])
+
+    def test_it_is_carried_in_the_history(self):
+        case = HistoryTests()
+        h = case.build(case.account(), case.dense())
+        self.assertEqual(h["risk"], history.risk(h["curve"]))
+
+    def test_the_page_draws_it_from_the_histories_words_and_numbers(self):
+        page = page_source()
+        body = template_function("renderRisk", page)
+        self.assertIn('id="riskCard"', page)
+        self.assertIn("'renderRisk'", template_function("renderAll", page))
+        self.assertIn("$('riskCard').hidden = !R || !!DATA.as_of;", body)    # no history, or a past day, no card
+        self.assertIn("esc(sentence(R.why))", body)                         # a withheld one says why in history.py's words
+        for owned in ("52", "50%", "1.96", "95%"):                          # what history.py and uncertainty.py own reaches the page as data
+            self.assertNotIn(owned, body, owned)
+        self.assertIn("pct(R.flow_weight)", body)
+        self.assertIn("pct(R.max_flow)", body)
+        self.assertIn("B.level", body)
+        self.assertNotIn("critical", body)                                   # no figure is coloured as good or bad
+
+    def test_the_evidence_register_states_what_the_code_uses(self):
+        text = read(os.path.join(ROOT, "docs", "EVIDENCE.md"))
+        self.assertIn(f"At least {history.RISK_MIN_WEEKS} whole weeks", text)
+        self.assertEqual((history.RISK_FLOW_WEIGHT, history.RISK_MAX_FLOW, history.RISK_WEEKS_A_YEAR), (0.5, 0.5, 52))
+        for name in ("history.RISK_FLOW_WEIGHT", "history.RISK_MAX_FLOW", "history.RISK_MIN_WEEKS", "uncertainty.slope", "rating.tilt"):
+            self.assertIn(name, text, name)

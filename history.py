@@ -1,4 +1,5 @@
-"""The account year by year.
+"""The account year by year (the owner, 28 Sep 2026: "we can add an extra section and name it
+history, where I can check my returns per year, that way I can better track everything").
 
 Trading 212 gives the account's value today, and every movement of money and shares since it
 opened, but not its value on any past day. So each year's end is rebuilt from the record: the
@@ -26,10 +27,12 @@ Only US shares have daily closes (Tiingo), so a year that ended with a line list
 held has no rebuilt value, and says why. The current year ends today, at Trading 212's total.
 """
 import bisect
+import statistics
 from datetime import date, timedelta
 
 import broker
 import prices as price_store
+import uncertainty
 
 # The rebuilt account today may differ from Trading 212's total by this share of it and still
 # be used (the desk's choice): fractional shares rounded in the record and a day's price
@@ -300,6 +303,81 @@ def curve(flows, fills, moves, prices, splits, fx, currency, today, total, check
     return out
 
 
+# ---- how rough the ride was, from the weekly curve --------------------------------------------
+# Plain descriptive figures, no threshold and no verdict. A week's return is Modified Dietz's (Bank
+# Administration Institute 1968; a method GIPS allows): the change in value less the money put in, over
+# the opening value plus half of what was put in, since a deposit lands on some day of the week and
+# half is the average. It is applied to the account and to the S&P 500 with the same deposits alike.
+RISK_MIN_WEEKS = 52        # weekly returns needed before any of it is shown (the desk's choice: a year)
+RISK_FLOW_WEIGHT = 0.5     # how much of a week's deposits counts as having been in the account all week (Dietz: the average)
+RISK_MAX_FLOW = 0.5        # a week whose net deposits exceed this share of its opening value is left out of
+                           # the swing and the beta, where the half-week assumption would matter most (the desk's choice)
+RISK_WEEKS_A_YEAR = 52     # a weekly swing is made a year's by the square root of the weeks in one (the usual convention)
+
+
+def _dietz(v0, v1, flow):
+    """One week's return with the deposits taken out, or None when there was nothing to earn on."""
+    base = v0 + RISK_FLOW_WEIGHT * flow
+    return (v1 - v0 - flow) / base if base > 0 else None
+
+
+def _swing(returns):
+    """The spread of the weekly returns made a year's: their sample standard deviation times the square root of
+    the weeks in a year."""
+    return statistics.stdev(returns) * RISK_WEEKS_A_YEAR ** 0.5
+
+
+def _worst_fall(days, returns):
+    """The deepest fall from a high to a later low in the chain of the weekly returns (return i ends on
+    `days[i + 1]`; a week with none counts as no change), with the day of the high, of the low and of the
+    first return to that high: {"depth", "peak", "trough", "back"}. Weekly closes only: a fall inside a
+    week is not seen."""
+    levels = [1.0]
+    for r in returns:
+        levels.append(levels[-1] * (1 + (r or 0.0)))
+    high = 0                                    # index of the highest level so far
+    worst, at = 0.0, (0, 0)
+    for i, level in enumerate(levels):
+        if level >= levels[high]:
+            high = i
+        elif 1 - level / levels[high] > worst:
+            worst, at = 1 - level / levels[high], (high, i)
+    back = next((days[j] for j in range(at[1] + 1, len(levels)) if levels[j] >= levels[at[0]]), None) if worst else None
+    return {"depth": worst, "peak": days[at[0]], "trough": days[at[1]], "back": back}
+
+
+def risk(curve):
+    """The swing, the worst fall and the beta of the account beside the S&P 500 with the same deposits, over the
+    weeks of `curve`. {"weeks", "since", "until", "swing": {account, market}, "fall": {account, market},
+    "beta": {slope, low, high, explained, ...}, "flow_weight", "max_flow"}, or {"why": ...} when the weeks are too few or the curve is withheld."""
+    if not curve or "why" in curve:
+        return {"why": (curve or {}).get("why") or "the account's weeks are not known"}
+    days, accounts, markets, net = curve["days"], curve["account"], curve["market"], curve["net"]
+    a_returns, m_returns, kept = [], [], []
+    for i in range(1, len(days)):
+        flow = net[i] - net[i - 1]
+        a = _dietz(accounts[i - 1], accounts[i], flow)
+        m = None if markets[i - 1] is None or markets[i] is None else _dietz(markets[i - 1], markets[i], flow)
+        a_returns.append(a)
+        m_returns.append(m)
+        whole_week = (date.fromisoformat(days[i]) - date.fromisoformat(days[i - 1])).days == CURVE_STEP_DAYS
+        small = abs(flow) <= RISK_MAX_FLOW * accounts[i - 1]
+        if a is not None and m is not None and whole_week and small:
+            kept.append((a, m))
+    if not any(m is not None for m in markets):
+        return {"why": "the S&P 500's closes are not stored for these weeks, so the account cannot be set against it"}
+    if len(kept) < RISK_MIN_WEEKS:
+        known = "no whole week is" if not kept else f"only {len(kept)} whole week{'' if len(kept) == 1 else 's'} {'is' if len(kept) == 1 else 'are'}"
+        return {"why": f"{known} known, and it takes {RISK_MIN_WEEKS} (a year) to say anything about a swing"}
+    fit = uncertainty.slope([m for _, m in kept], [a for a, _ in kept])
+    if fit is None:
+        return {"why": "the S&P 500 did not move in these weeks, so the account cannot be set against it"}
+    return {"weeks": len(kept), "since": days[0], "until": days[-1],
+            "swing": {"account": _swing([a for a, _ in kept]), "market": _swing([m for _, m in kept])},
+            "fall": {"account": _worst_fall(days, a_returns), "market": _worst_fall(days, m_returns)},
+            "beta": fit, "flow_weight": RISK_FLOW_WEIGHT, "max_flow": RISK_MAX_FLOW}
+
+
 def build(raw, account, prices, today):
     """The years, oldest first, the totals and the check. None with no money ever put in."""
     import build_desk
@@ -379,8 +457,9 @@ def build(raw, account, prices, today):
     whole = build_desk.money_weighted_return(flows, total, today.isoformat()) if total else None
     market, _, why_market = build_desk.same_money_in_market(flows, prices, currency) if total else (None, None, None)
     both = build_desk.money_weighted_return(flows, market, today.isoformat()) if market is not None else None
+    weekly = curve(flows, fills, moves, prices, splits, fx, currency, today, total, checked)
     return {"years": years, "currency": currency, "since": first, "check": checked,
-            "curve": curve(flows, fills, moves, prices, splits, fx, currency, today, total, checked),
+            "curve": weekly, "risk": risk(weekly),
             "total": {"deposited": deposited, "withdrawn": withdrawn,
                       "earned": total - (deposited - withdrawn) if total else None,
                       "return": whole, "market": {"value": market, "return": both, "difference": total - market}

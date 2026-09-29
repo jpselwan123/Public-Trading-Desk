@@ -964,6 +964,9 @@ class HealthCheckTests(unittest.TestCase):
             self.assertIn(line, checked)
         for held in ("AAPL", "MSFT", "VOO"):
             self.assertNotIn(held, checked)
+        # whether the weekly line and the risk figures can be drawn, by count and category, never by amount
+        self.assertRegex(checked, r"weekly +(drawn · \d+ weeks, \d+ left out|withheld · |no money put in yet)")
+        self.assertNotRegex(checked[checked.index("weekly"):], r"[$€£]|\d,\d{3}")
         sec = next(h for url, h in asked if "sec.gov" in url)
         self.assertIn("owner@example.com", sec["User-agent"])                  # sent to the SEC, never printed
         press = next(url for url, h in asked if "news.google.com" in url)
