@@ -548,3 +548,120 @@ class BrokerWiringTests(unittest.TestCase):
         mine = next(r for r in found if r[0] == "Your broker")
         self.assertEqual(mine[1], "ok")
         self.assertIn("rows", mine[2])
+
+
+class TransientFailureTests(unittest.TestCase):
+    """The readers that are not Trading 212's (which paces itself from its own headers) ask again when a failure
+    is the kind that passes, so one busy moment does not end a sync (a reader's fair point, 29 Sep 2026)."""
+
+    class Answer:
+        def __init__(self, text):
+            self.text, self.headers = text, {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return self.text
+
+    def flaky(self, *steps):
+        calls = []
+
+        def open_(req, timeout=None):
+            calls.append(req.full_url)
+            step = steps[min(len(calls) - 1, len(steps) - 1)]
+            if isinstance(step, BaseException):
+                raise step
+            return self.Answer(step)
+        return open_, calls
+
+    def http(self, code, retry_after=None):
+        return urllib.error.HTTPError("https://x.example/", code, "no", {"Retry-After": retry_after} if retry_after else {}, None)
+
+    def test_a_rate_limit_is_waited_out_as_long_as_the_service_says(self):
+        open_, calls = self.flaky(self.http(429, "7"), self.http(429), b'{"ok": 1}')
+        waits = []
+        body, _ = broker.read(urllib.request.Request("https://x.example/"), open_, sleep=waits.append)
+        self.assertEqual((body, len(calls)), (b'{"ok": 1}', 3))
+        self.assertEqual(waits, [7.0, 10])                                # what it asked, then the desk's own second wait
+
+    def test_a_wait_is_never_longer_than_a_minute(self):
+        open_, _ = self.flaky(self.http(429, "9999"), b"{}")
+        waits = []
+        broker.read(urllib.request.Request("https://x.example/"), open_, sleep=waits.append)
+        self.assertEqual(waits, [broker.LONGEST_WAIT])
+
+    def test_a_busy_server_and_a_dropped_connection_are_asked_again(self):
+        for failure in (self.http(503), self.http(502), urllib.error.URLError("reset"), TimeoutError("slow")):
+            open_, calls = self.flaky(failure, b"fine")
+            self.assertEqual(broker.read(urllib.request.Request("https://x.example/"), open_, sleep=lambda s: None)[0], b"fine")
+            self.assertEqual(len(calls), 2, failure)
+
+    def test_a_refusal_is_not_asked_again(self):
+        for code in (400, 401, 403, 404):
+            open_, calls = self.flaky(self.http(code), b"never")
+            with self.assertRaises(urllib.error.HTTPError):
+                broker.read(urllib.request.Request("https://x.example/"), open_, sleep=lambda s: self.fail("waited"))
+            self.assertEqual(len(calls), 1, code)
+
+    def test_it_gives_up_after_the_last_try_and_raises_what_came(self):
+        open_, calls = self.flaky(self.http(429))
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            broker.read(urllib.request.Request("https://x.example/"), open_, sleep=lambda s: None, retries=2)
+        self.assertEqual((cm.exception.code, len(calls)), (429, 3))
+        open_, calls = self.flaky(urllib.error.URLError("down"))
+        with self.assertRaises(urllib.error.URLError):
+            broker.read(urllib.request.Request("https://x.example/"), open_, sleep=lambda s: None)
+        self.assertEqual(len(calls), 3)
+
+    def test_alpaca_gets_through_a_rate_limit_and_still_words_a_refusal(self):
+        open_, calls = self.flaky(self.http(429), b'{"currency": "USD"}')
+        client = broker_alpaca.Client("k", "s", opener=open_, sleep=lambda s: None)
+        self.assertEqual(client.get("/v2/account"), {"currency": "USD"})
+        open_, calls = self.flaky(self.http(429))
+        with self.assertRaises(broker.BrokerError) as cm:
+            broker_alpaca.Client("k", "s", opener=open_, sleep=lambda s: None).get("/v2/account")
+        self.assertIn("too many requests", str(cm.exception))
+        self.assertEqual(len(calls), 3)
+        open_, calls = self.flaky(self.http(401))
+        with self.assertRaises(broker.BrokerError) as cm:
+            broker_alpaca.Client("k", "s", opener=open_, sleep=lambda s: self.fail("waited")).get("/v2/account")
+        self.assertIn("the key was refused", str(cm.exception))
+        self.assertEqual(len(calls), 1)
+
+    def test_alpaca_says_it_did_not_answer_only_after_asking_again(self):
+        open_, calls = self.flaky(urllib.error.URLError("offline"))
+        with self.assertRaises(broker.BrokerError) as cm:
+            broker_alpaca.Client("k", "s", opener=open_, sleep=lambda s: None).get("/v2/account")
+        self.assertIn("did not answer", str(cm.exception))
+        self.assertEqual(len(calls), 3)
+
+    def test_interactive_brokers_gets_through_a_busy_moment_too(self):
+        report = "<FlexQueryResponse queryName='q'></FlexQueryResponse>"
+        send = ("<FlexStatementResponse><Status>Success</Status><ReferenceCode>77</ReferenceCode>"
+                "<Url>https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/GetStatement</Url></FlexStatementResponse>")
+        steps = [self.http(503), send, urllib.error.URLError("reset"), report]
+        seen = []
+
+        def open_(req, timeout=None):
+            seen.append(req.full_url)
+            step = steps[len(seen) - 1]
+            if isinstance(step, BaseException):
+                raise step
+            return self.Answer(step.encode())
+        waits = []
+        statement = broker_ibkr.fetch("tok", "123", opener=open_, sleep=waits.append)
+        self.assertEqual(statement.tag, "FlexQueryResponse")
+        self.assertEqual(len(seen), 4)
+        self.assertEqual(waits, [2, 2])
+
+    def test_the_reads_stay_reads(self):
+        """Retrying is only for a GET the reader built: the helper takes a request and never makes one."""
+        source = open(os.path.join(ROOT, "broker.py")).read()
+        body = source[source.index("def read("):source.index("class BrokerError")]
+        self.assertNotIn("Request(", body)
+        self.assertNotIn("data=", body)
+        self.assertNotIn("POST", body)

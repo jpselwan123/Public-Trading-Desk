@@ -10,7 +10,7 @@ shares times its price: Alpaca charges no commission on a trade, and its regulat
 as activities of their own, counted as fees. A split, a symbol change or shares moved in from
 another broker bring no money; shares that arrive without a trade show in the checks.
 """
-import json, os, urllib.error, urllib.parse, urllib.request
+import json, os, time, urllib.error, urllib.parse, urllib.request
 
 import broker
 from env_config import load_env, unpacked
@@ -46,12 +46,12 @@ class Client:
     """GET only: the three reads above."""
     PATHS = ("/v2/account", "/v2/positions", "/v2/account/activities")
 
-    def __init__(self, key, secret, env="live", opener=None):
+    def __init__(self, key, secret, env="live", opener=None, sleep=time.sleep):
         self.host, self.env = HOSTS[env], env
         self._headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret,
                          "Accept": "application/json", "Accept-Encoding": "gzip",
                          "User-Agent": "trading-desk (personal, read only)"}
-        self._open = opener or urllib.request.urlopen
+        self._open, self._sleep = opener, sleep
 
     def get(self, path, params=None):
         if path not in self.PATHS:
@@ -59,8 +59,8 @@ class Client:
         url = self.host + path + ("?" + urllib.parse.urlencode(params) if params else "")
         req = urllib.request.Request(url, headers=self._headers)
         try:
-            with self._open(req, timeout=TIMEOUT) as r:
-                return json.loads(unpacked(r.read(), r) or b"null")
+            body, r = broker.read(req, self._open, TIMEOUT, self._sleep)
+            return json.loads(unpacked(body, r) or b"null")
         except urllib.error.HTTPError as e:
             words = {401: "the key was refused", 403: "the key may not read this account",
                      429: "too many requests for now: try again in a minute"}.get(e.code, f"HTTP {e.code}")
@@ -148,9 +148,9 @@ def record(account, positions, items, env="live", existing=None):
                       total=_num(account.get("portfolio_value") or account.get("equity")), existing=existing)
 
 
-def sync(existing=None, environ=None, opener=None):
+def sync(existing=None, environ=None, opener=None, sleep=time.sleep):
     key, secret, env = credentials(environ)
-    client = Client(key, secret, env, opener)
+    client = Client(key, secret, env, opener, sleep)
     if (existing or {}).get("env") != env:
         existing = {}                                   # live and paper are two accounts
     account, positions = client.get("/v2/account"), client.get("/v2/positions")
@@ -163,7 +163,7 @@ def sync(existing=None, environ=None, opener=None):
     return record(account, positions, activities(client, after), env, existing)
 
 
-def check(environ=None, opener=None):
+def check(environ=None, opener=None, sleep=time.sleep):
     key, secret, env = credentials(environ)
-    account = Client(key, secret, env, opener).get("/v2/account") or {}
+    account = Client(key, secret, env, opener, sleep).get("/v2/account") or {}
     return f"answered ({env}), account currency {account.get('currency', '?')}"

@@ -21,6 +21,11 @@ gives more than a CSV does: its own cash, holdings and total, so the checks can 
 4. **Standard library only, Python 3.9 compatible.** No `match`, no `X | Y`. Read every timestamp
    through `env_config.moment`.
 5. **Money in the account's currency, prices in the line's own.** State what each field is.
+6. **Read through `broker.read`.** Build the GET yourself, from your allowlisted paths, and pass it to
+   `broker.read(request, opener, timeout, sleep)`. It asks again when a failure is one that passes (a rate
+   limit, waiting as long as the service says, a busy server, a dropped connection) and never when the key
+   is refused. Word the error it finally raises in your own adapter's terms, as `broker_alpaca` does.
+   Take `sleep` as a parameter so a test does not wait.
 
 ## The steps
 

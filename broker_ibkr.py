@@ -47,12 +47,12 @@ def credentials(environ=None):
     return token, query
 
 
-def _get(url, opener=None):
+def _get(url, opener=None, sleep=time.sleep):
     req = urllib.request.Request(url, headers={"User-Agent": "trading-desk (personal, read only)",
                                                "Accept-Encoding": "gzip"})
     try:
-        with (opener or urllib.request.urlopen)(req, timeout=TIMEOUT) as r:
-            return ET.fromstring(unpacked(r.read(), r))
+        body, r = broker.read(req, opener, TIMEOUT, sleep)
+        return ET.fromstring(unpacked(body, r))
     except urllib.error.HTTPError as e:
         raise broker.BrokerError(f"Interactive Brokers: HTTP {e.code}") from None
     except (urllib.error.URLError, OSError) as e:
@@ -68,7 +68,7 @@ def _said(root):
 
 def fetch(token, query, opener=None, sleep=time.sleep):
     """The statement, as IBKR's Flex Web Service gives it: asked for, then collected."""
-    root = _get(SEND + "?" + urllib.parse.urlencode({"t": token, "q": query, "v": 3}), opener)
+    root = _get(SEND + "?" + urllib.parse.urlencode({"t": token, "q": query, "v": 3}), opener, sleep)
     status, code, message = _said(root)
     if status != "Success":
         raise broker.BrokerError(f"Interactive Brokers refused the report: {message or status} ({code})")
@@ -78,7 +78,7 @@ def fetch(token, query, opener=None, sleep=time.sleep):
     for wait in (0,) + WAITS:
         if wait:
             sleep(wait)
-        statement = _get(url + "?" + urllib.parse.urlencode({"t": token, "q": reference, "v": 3}), opener)
+        statement = _get(url + "?" + urllib.parse.urlencode({"t": token, "q": reference, "v": 3}), opener, sleep)
         if statement.tag == "FlexQueryResponse":
             return statement
         status, code, message = _said(statement)
