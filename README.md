@@ -202,6 +202,10 @@ python3 -m unittest discover -s tests -t tests
 
 `AUTO_UPDATE=1` in `.env` brings in new code from this repository each time the desk opens. It only fast-forwards, never over a file you have changed. It is off by default.
 
+## How it was made
+
+Written with the help of [Claude Code](https://claude.com/claude-code), Anthropic's coding assistant, and kept honest by its tests: over 600 of them, plus checks against known answers. That is a reason to read the code rather than to skip it, which is why [what it connects to](docs/NETWORK.md) and how to check it are written down.
+
 ## Not investment advice
 
 This is a tool for looking at your own account and at public information. It is not investment advice, and its rating is a summary of published research, not a recommendation to you. Past results, including every backtest here, do not promise future ones. Check anything that matters against your broker's own statements.
