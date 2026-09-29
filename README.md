@@ -133,7 +133,7 @@ It also runs on an iPhone in the free a-Shell app ([`docs/IPHONE.md`](docs/IPHON
 
 ## The desk's rating
 
-`rating.py` gives a US company **Buy, Hold or Sell**. It uses seven published measures, grouped into four themes:
+`rating.py` gives a US company **Buy, Hold or Sell**. It uses five published measures, grouped into four themes:
 
 - value: book to market, and share issuance;
 - momentum;
