@@ -1,4 +1,5 @@
 """The page: one definition for every number it shows, its look, its wording, and the desk as of a past day."""
+import base64
 from support import *  # noqa: F401,F403
 
 
@@ -817,6 +818,41 @@ class LookTests(unittest.TestCase):
         css = self.template().split("</style>", 1)[0]
         self.assertNotIn("text-transform:uppercase", css)
         self.assertNotIn("IBM Plex Mono", self.template())
+
+    def test_the_typefaces_are_the_pages_own(self):
+        """The look of the page (29 Sep 2026: it must not change) is Archivo for headings and
+        figures and IBM Plex Sans for the rest, as it was when Google served them. Both are kept in
+        page/fonts/ with their licences and carried inside the built page."""
+        css = self.template().split("</style>", 1)[0]
+        faces = re.findall(r"@font-face\{font-family:\"([^\"]+)\"", css)
+        self.assertEqual(sorted(faces), ["Archivo", "IBM Plex Sans"])
+        named = set(re.findall(r"font-family:\"([^\"]+)\"", css)) | set(re.findall(r"--font-num:\"([^\"]+)\"", css))
+        self.assertEqual(named, set(faces))                   # no font is named that the page does not carry
+        page = build_desk.render({})
+        self.assertEqual(page.count("data:font/woff2;base64,"), len(faces))
+        self.assertNotIn("__FONT_", page)
+        folder = os.path.join(ROOT, "page", "fonts")
+        licences = open(os.path.join(folder, "LICENSES.txt")).read()
+        self.assertIn("SIL Open Font License", licences)
+        for token, name in build_desk.PAGE_FONTS.items():
+            with open(os.path.join(folder, name), "rb") as f:
+                data = f.read()
+            self.assertEqual(data[:4], b"wOF2", name)          # a real web font, not a saved error page
+            self.assertLess(len(data), 100_000, name)
+            self.assertIn("data:font/woff2;base64," + base64.b64encode(data).decode("ascii"), page)
+            self.assertIn(name, licences)
+        self.assertEqual(sorted(n for n in os.listdir(folder) if n.endswith(".woff2")), sorted(build_desk.PAGE_FONTS.values()))
+
+    def test_a_missing_typeface_does_not_stop_the_page(self):
+        """Never break the page: with a font file gone, the browser goes on to the next font in the stack."""
+        real = build_desk.PAGE_FONTS
+        build_desk.PAGE_FONTS = {token: "gone.woff2" for token in real}
+        try:
+            page = build_desk.render({})
+        finally:
+            build_desk.PAGE_FONTS = real
+        self.assertNotIn("__FONT_", page)
+        self.assertNotIn("data:font/woff2", page)
 
     def test_one_company_at_a_time(self):
         """Every company's full card, one after another, made a page thousands of pixels

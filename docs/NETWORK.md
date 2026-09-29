@@ -8,7 +8,9 @@ cannot add a new destination without documenting it.
 **There is no server run by the author.** Nothing to sign up for, no account, no analytics, no
 telemetry, no crash reports. The page you look at is served by a small program on
 `127.0.0.1` (your own computer), and it loads nothing from the internet: no scripts, no fonts, no
-images. `tests/test_network.py` checks that too.
+images. Its two typefaces (Archivo and IBM Plex Sans, under the SIL Open Font License) are files in
+`page/fonts/` that the build puts into the page, so the page is complete the moment it arrives.
+`tests/test_network.py` checks that too, on the source and on the built page.
 
 ## Every host
 

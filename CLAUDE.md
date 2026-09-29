@@ -78,7 +78,8 @@ python3 doctor.py [--account|--offline]              # the health report: safe t
   so `scrub` blanks it from any error (`test_every_brokers_secrets_are_blanked...` ties the two).
   - Every file the desk writes is made by `env_config.atomic_write`, readable by its owner alone
     (0600); nothing else opens a file for writing (`PrivateFileTests`).
-  - The page loads nothing from the internet, and every host the code names is in
+  - The page loads nothing from the internet (its two typefaces, Archivo and IBM Plex Sans, are files in
+    `page/fonts/` that `build_desk.render` puts into the page; SIL Open Font License), and every host the code names is in
     `docs/NETWORK.md` (`tests/test_network.py`). A new destination is documented in the same change.
   - Text from outside (a broker file, a news feed, a filing) reaches the page only through `esc()`.
     What a broker supplies as a currency, symbol or market is checked where it is read

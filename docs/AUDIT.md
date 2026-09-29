@@ -132,7 +132,7 @@ and the personal context taken out.
 
 | Found | Why it mattered | Fixed |
 |---|---|---|
-| The page fetched two web fonts from Google each time it opened. | A page showing an account made a request to a third party. | Uses the system's fonts; a test fails if the page loads anything from outside. |
+| The page fetched two web fonts from Google each time it opened. | A page showing an account made a request to a third party. | The same two typefaces, kept as files in the repository and put into the page when it is built; a test fails if the source or the built page loads anything from outside. |
 | A currency code the browser did not recognise was printed into the page unescaped, and nothing checked what a broker file called a currency or a symbol. | A hostile CSV could have injected script into the page. It was the only path found. | The fallback is escaped; currencies, symbols and markets are checked where a broker's data is read, with the line number. |
 | The list of keys blanked from errors (and from the `doctor.py` report meant for pasting) named Trading 212's, Tiingo's, Finnhub's and OpenAI's, not Alpaca's or Interactive Brokers'. | An error quoting one of them would have shown it. None does today. | All are listed, and a test ties the list to the broker registry. |
 | Files holding holdings, follow lists and trades were readable by other users of a shared computer. | Only the account file and the notes were private. | Every file is written readable by its owner alone; a test stops any other way of creating files. |

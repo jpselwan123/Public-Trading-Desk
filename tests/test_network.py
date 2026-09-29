@@ -46,6 +46,14 @@ class NetworkTests(unittest.TestCase):
             for pattern in loads:
                 self.assertIsNone(re.search(pattern, text), f"{os.path.relpath(path, ROOT)} matches {pattern}")
 
+    def test_the_built_page_loads_nothing_from_the_internet_either(self):
+        """The page as it is served, with its typefaces put in as data: still no address outside the desk."""
+        page = build_desk.render({})
+        for pattern in (r"<(?:link|script|img|iframe|source|video|audio|embed|object)\b[^>]*\b(?:src|href|data)\s*=\s*[\"']?https?:",
+                        r"@import", r"url\(\s*[\"']?https?:", r"fonts\.g(?:oogleapis|static)\.com", r"sendBeacon"):
+            self.assertIsNone(re.search(pattern, page), pattern)
+        self.assertEqual(page.count("data:font/woff2;base64,"), 2)      # its own two typefaces, nothing fetched
+
     def test_the_code_reaches_the_network_only_through_urllib(self):
         """One way to read: nothing to look for but urllib, and no library that could phone home."""
         never = re.compile(r"^\s*(?:import|from)\s+(?:requests|httpx|aiohttp|urllib3|websockets?|smtplib|ftplib|telnetlib)\b", re.M)

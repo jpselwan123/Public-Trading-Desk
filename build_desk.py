@@ -6,7 +6,7 @@ scores, no recommendations.
 
 Usage: python3 build_desk.py [dir]      (dir defaults to this folder; demo → demo/)
 """
-import json, math, os, sys
+import base64, json, math, os, sys
 from datetime import date, datetime, timedelta, timezone
 from env_config import atomic_write, atomic_write_json, moment
 import prices as price_store
@@ -1369,8 +1369,25 @@ def template_source():
             .replace("__PAGE_JS__\n", "".join(read(os.path.join(PAGE, name)) for name in PAGE_SCRIPTS)))
 
 
+# The page's typefaces (page/fonts/, licences beside them) and the places in the stylesheet they go.
+PAGE_FONTS = {"__FONT_ARCHIVO__": "archivo-latin.woff2", "__FONT_IBMPLEXSANS__": "ibmplexsans-latin.woff2"}
+
+
+def font_uri(name):
+    """A typeface kept in page/fonts/, as data the page carries itself, so it asks no one for it.
+    One that is missing or cannot be read gives an empty address: the browser goes on to the next
+    font in the stack, and the page still opens."""
+    try:
+        with open(os.path.join(PAGE, "fonts", name), "rb") as f:
+            return "data:font/woff2;base64," + base64.b64encode(f.read()).decode("ascii")
+    except OSError:
+        return "data:,"
+
+
 def render(data):
     html = template_source()
+    for token, name in PAGE_FONTS.items():
+        html = html.replace(token, font_uri(name))
     payload = json.dumps(data).replace("</", "<\\/")     # can't close the <script>
     return html.replace("__DATA__", payload)
 
