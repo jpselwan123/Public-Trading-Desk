@@ -584,37 +584,37 @@ class TransientFailureTests(unittest.TestCase):
     def test_a_rate_limit_is_waited_out_as_long_as_the_service_says(self):
         open_, calls = self.flaky(self.http(429, "7"), self.http(429), b'{"ok": 1}')
         waits = []
-        body, _ = broker.read(urllib.request.Request("https://x.example/"), open_, sleep=waits.append)
+        body, _ = env_config.read(urllib.request.Request("https://x.example/"), open_, sleep=waits.append)
         self.assertEqual((body, len(calls)), (b'{"ok": 1}', 3))
         self.assertEqual(waits, [7.0, 10])                                # what it asked, then the desk's own second wait
 
     def test_a_wait_is_never_longer_than_a_minute(self):
         open_, _ = self.flaky(self.http(429, "9999"), b"{}")
         waits = []
-        broker.read(urllib.request.Request("https://x.example/"), open_, sleep=waits.append)
-        self.assertEqual(waits, [broker.LONGEST_WAIT])
+        env_config.read(urllib.request.Request("https://x.example/"), open_, sleep=waits.append)
+        self.assertEqual(waits, [env_config.LONGEST_WAIT])
 
     def test_a_busy_server_and_a_dropped_connection_are_asked_again(self):
         for failure in (self.http(503), self.http(502), urllib.error.URLError("reset"), TimeoutError("slow")):
             open_, calls = self.flaky(failure, b"fine")
-            self.assertEqual(broker.read(urllib.request.Request("https://x.example/"), open_, sleep=lambda s: None)[0], b"fine")
+            self.assertEqual(env_config.read(urllib.request.Request("https://x.example/"), open_, sleep=lambda s: None)[0], b"fine")
             self.assertEqual(len(calls), 2, failure)
 
     def test_a_refusal_is_not_asked_again(self):
         for code in (400, 401, 403, 404):
             open_, calls = self.flaky(self.http(code), b"never")
             with self.assertRaises(urllib.error.HTTPError):
-                broker.read(urllib.request.Request("https://x.example/"), open_, sleep=lambda s: self.fail("waited"))
+                env_config.read(urllib.request.Request("https://x.example/"), open_, sleep=lambda s: self.fail("waited"))
             self.assertEqual(len(calls), 1, code)
 
     def test_it_gives_up_after_the_last_try_and_raises_what_came(self):
         open_, calls = self.flaky(self.http(429))
         with self.assertRaises(urllib.error.HTTPError) as cm:
-            broker.read(urllib.request.Request("https://x.example/"), open_, sleep=lambda s: None, retries=2)
+            env_config.read(urllib.request.Request("https://x.example/"), open_, sleep=lambda s: None, retries=2)
         self.assertEqual((cm.exception.code, len(calls)), (429, 3))
         open_, calls = self.flaky(urllib.error.URLError("down"))
         with self.assertRaises(urllib.error.URLError):
-            broker.read(urllib.request.Request("https://x.example/"), open_, sleep=lambda s: None)
+            env_config.read(urllib.request.Request("https://x.example/"), open_, sleep=lambda s: None)
         self.assertEqual(len(calls), 3)
 
     def test_alpaca_gets_through_a_rate_limit_and_still_words_a_refusal(self):
@@ -658,10 +658,51 @@ class TransientFailureTests(unittest.TestCase):
         self.assertEqual(len(seen), 4)
         self.assertEqual(waits, [2, 2])
 
+    def test_trading_212_uses_the_same_read_and_keeps_its_own_rules(self):
+        """Trading 212 paces itself from its own headers and has its own words for a block; it now goes through the
+        one read like the others, so a busy server is asked again too."""
+        waits, seen = [], []
+
+        def open_(req, timeout=None):
+            seen.append(req.full_url)
+            step = steps[len(seen) - 1]
+            if isinstance(step, BaseException):
+                raise step
+            return self.Answer(step)
+        steps = [urllib.error.HTTPError("https://x.example/", 429, "slow", {"x-ratelimit-reset": str(time.time() + 3)}, None),
+                 urllib.error.HTTPError("https://x.example/", 503, "busy", {}, None), b'{"currency": "USD"}']
+        client = t212.Client("k", "s", "demo", opener=open_, sleep=waits.append)
+        self.assertEqual(client.get("/api/v0/equity/account/summary"), {"currency": "USD"})
+        self.assertEqual(len(seen), 3)
+        self.assertGreater(waits[0], 0.5)                               # the wait its own reset header asked for
+        self.assertLessEqual(waits[0], 4)
+        self.assertEqual(waits[1], 4)                                   # a busy server, on the second try: the shared wait, 2 s longer each time
+        with self.assertRaises(t212.T212Error):
+            t212.Client("k", "s", "demo", opener=lambda *a, **k: (_ for _ in ()).throw(urllib.error.URLError("down")),
+                        sleep=lambda s: None).get("/api/v0/equity/account/summary")
+        blocked = urllib.error.HTTPError("https://x.example/", 403, "no", {}, io.BytesIO(b"Access Denied"))
+        with self.assertRaises(t212.T212Error) as cm:
+            t212.Client("k", "s", "demo", opener=lambda *a, **k: (_ for _ in ()).throw(blocked),
+                        sleep=lambda s: self.fail("waited")).get("/api/v0/equity/account/summary")
+        self.assertIn("blocking this internet connection", str(cm.exception))
+
+    def test_the_hooks_wait_as_told_and_look_at_each_good_answer(self):
+        open_, calls = self.flaky(self.http(429), self.http(429), b"fine")
+        waits, looked = [], []
+        body, _ = env_config.read(urllib.request.Request("https://x.example/"), open_, sleep=waits.append, retries=0,
+                                  rate_retries=3, wait=lambda e, attempt: 30 + attempt, after=lambda r: looked.append(r))
+        self.assertEqual((body, waits, len(looked)), (b"fine", [30, 31], 1))
+        open_, calls = self.flaky(self.http(503), b"never")           # retries=0: a busy server is not asked again
+        with self.assertRaises(urllib.error.HTTPError):
+            env_config.read(urllib.request.Request("https://x.example/"), open_, sleep=lambda s: None, retries=0)
+        self.assertEqual(len(calls), 1)
+
     def test_the_reads_stay_reads(self):
         """Retrying is only for a GET the reader built: the helper takes a request and never makes one."""
-        source = open(os.path.join(ROOT, "broker.py")).read()
-        body = source[source.index("def read("):source.index("class BrokerError")]
+        source = open(os.path.join(ROOT, "env_config.py")).read()
+        body = source[source.index("def read("):source.index("def unpacked(")]
         self.assertNotIn("Request(", body)
         self.assertNotIn("data=", body)
         self.assertNotIn("POST", body)
+        for name in ("t212.py", "broker_alpaca.py", "broker_ibkr.py"):
+            self.assertIn("read(", open(os.path.join(ROOT, name)).read(), name)

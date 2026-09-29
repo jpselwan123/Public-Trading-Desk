@@ -24,7 +24,7 @@ figures beside themselves as if they were the broker's.
 Usage: python3 broker.py            sync the account from the broker .env names
        python3 broker.py --check    ask the broker once, and say what answered
 """
-import json, os, re, sys, time, urllib.error, urllib.request
+import json, os, re, sys
 from datetime import datetime, timezone
 
 from env_config import atomic_write_json, load_env
@@ -78,37 +78,6 @@ ALIASES = {"t212": "trading212", "trading_212": "trading212", "ib": "ibkr", "int
 # reclaimed): counted in the cash as it comes, never as a deposit (history._cash_moves).
 CASH_KINDS = ("DEPOSIT", "WITHDRAW", "FEE", "TRANSFER", "INTEREST_ON_FREE_CASH", "ADJUSTMENT")
 US_SUFFIX = "_US_EQ"
-
-
-TRANSIENT = (500, 502, 503, 504)      # a busy or restarting server: asking again in a moment usually works
-LONGEST_WAIT = 60                     # never wait longer than this for a service that says when to come back
-
-
-def read(request, opener=None, timeout=30, sleep=time.sleep, retries=2):
-    """One GET's answer, `(body, response)`, asking again when the failure is one that passes: a rate
-    limit (waiting as long as the service says, up to a minute), a busy server, a dropped connection.
-    A refusal (a wrong key, a page that is not there) is not asked again. After the last try the
-    failure is raised as it came, for the reader to put in its own words. GET only: the request is
-    built by the reader, which reaches its allowed paths alone."""
-    open_ = opener or urllib.request.urlopen
-    for attempt in range(retries + 1):
-        try:
-            with open_(request, timeout=timeout) as response:
-                return response.read(), response
-        except urllib.error.HTTPError as e:
-            if attempt < retries and (e.code == 429 or e.code in TRANSIENT):
-                try:
-                    asked = float((getattr(e, "headers", None) or {}).get("Retry-After"))
-                except (TypeError, ValueError):
-                    asked = None
-                sleep(min(LONGEST_WAIT, max(1.0, asked)) if asked else (5 if e.code == 429 else 2) * (attempt + 1))
-                continue
-            raise
-        except (urllib.error.URLError, OSError):
-            if attempt < retries:
-                sleep(2 * (attempt + 1))
-                continue
-            raise
 
 
 class BrokerError(Exception):

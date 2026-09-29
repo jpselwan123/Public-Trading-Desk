@@ -17,7 +17,7 @@ Usage:  python3 t212.py            sync
 """
 import base64, http.client, json, os, socket, sys, time, urllib.error, urllib.parse, urllib.request
 from datetime import datetime, timezone
-from env_config import load_env, atomic_write_json, unpacked
+from env_config import load_env, atomic_write_json, read, unpacked
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(HERE, "t212_data.json")
@@ -76,34 +76,26 @@ class Client:
         req = urllib.request.Request(url, method="GET", headers={
             "Authorization": self._auth, "Accept": "application/json", "Accept-Encoding": "gzip",
             "User-Agent": "trading-desk (personal, read-only)"})
-        for attempt in range(MAX_RETRIES + 1):
-            try:
-                with self._open(req, timeout=TIMEOUT) as r:
-                    body = r.read()
-                    self._pace(r.headers)
-                try:
-                    body = unpacked(body, r)
-                    return json.loads(body) if body else None
-                except (ValueError, OSError, EOFError):
-                    # a network's own page in place of Trading 212's answer
-                    raise T212Error("Trading 212's answer could not be read: another page came back in its "
-                                    "place (a network sign-in page?); check the connection and try again") from None
-            except urllib.error.HTTPError as e:
-                if e.code == 429 and attempt < MAX_RETRIES:
-                    self._sleep(self._wait_seconds(e.headers, default=10))
-                    continue
-                if e.code == 403 and b"Access Denied" in error_body(e):
-                    raise T212Error("Trading 212 is blocking this internet connection (its website refuses "
-                                    "this network or location), so the key was never checked") from None
-                raise T212Error(explain_status(e.code, base)) from None
-            except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError,
-                    http.client.HTTPException) as e:
-                if attempt < CONNECTION_RETRIES:
-                    self._sleep(2 * (attempt + 1))
-                    continue
-                reason = getattr(e, "reason", None) or "timed out"
-                raise T212Error(f"Can't reach Trading 212 ({reason}); check your connection and try again") from None
-        raise T212Error("Trading 212 kept rate-limiting; try again in a minute")
+        try:
+            body, r = read(req, self._open, TIMEOUT, self._sleep, retries=CONNECTION_RETRIES, rate_retries=MAX_RETRIES,
+                           wait=lambda e, attempt: self._wait_seconds(e.headers, default=10),
+                           after=lambda r: self._pace(r.headers))
+        except urllib.error.HTTPError as e:
+            if e.code == 403 and b"Access Denied" in error_body(e):
+                raise T212Error("Trading 212 is blocking this internet connection (its website refuses "
+                                "this network or location), so the key was never checked") from None
+            raise T212Error(explain_status(e.code, base)) from None
+        except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError,
+                http.client.HTTPException) as e:
+            reason = getattr(e, "reason", None) or "timed out"
+            raise T212Error(f"Can't reach Trading 212 ({reason}); check your connection and try again") from None
+        try:
+            body = unpacked(body, r)
+            return json.loads(body) if body else None
+        except (ValueError, OSError, EOFError):
+            # a network's own page in place of Trading 212's answer
+            raise T212Error("Trading 212's answer could not be read: another page came back in its "
+                            "place (a network sign-in page?); check the connection and try again") from None
 
     def _pace(self, headers):
         """If this call used the last request of the window, wait for the reset

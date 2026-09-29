@@ -20,7 +20,7 @@ import os, time, urllib.error, urllib.parse, urllib.request
 import xml.etree.ElementTree as ET
 
 import broker
-from env_config import load_env, unpacked
+from env_config import load_env, read, unpacked
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SEND = "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/SendRequest"
@@ -51,7 +51,7 @@ def _get(url, opener=None, sleep=time.sleep):
     req = urllib.request.Request(url, headers={"User-Agent": "trading-desk (personal, read only)",
                                                "Accept-Encoding": "gzip"})
     try:
-        body, r = broker.read(req, opener, TIMEOUT, sleep)
+        body, r = read(req, opener, TIMEOUT, sleep)
         return ET.fromstring(unpacked(body, r))
     except urllib.error.HTTPError as e:
         raise broker.BrokerError(f"Interactive Brokers: HTTP {e.code}") from None

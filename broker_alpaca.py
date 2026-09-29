@@ -13,7 +13,7 @@ another broker bring no money; shares that arrive without a trade show in the ch
 import json, os, time, urllib.error, urllib.parse, urllib.request
 
 import broker
-from env_config import load_env, unpacked
+from env_config import load_env, read, unpacked
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOSTS = {"live": "https://api.alpaca.markets", "paper": "https://paper-api.alpaca.markets"}
@@ -59,7 +59,7 @@ class Client:
         url = self.host + path + ("?" + urllib.parse.urlencode(params) if params else "")
         req = urllib.request.Request(url, headers=self._headers)
         try:
-            body, r = broker.read(req, self._open, TIMEOUT, self._sleep)
+            body, r = read(req, self._open, TIMEOUT, self._sleep)
             return json.loads(unpacked(body, r) or b"null")
         except urllib.error.HTTPError as e:
             words = {401: "the key was refused", 403: "the key may not read this account",
