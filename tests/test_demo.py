@@ -111,6 +111,22 @@ class DemoWorldTests(unittest.TestCase):
             if os.path.isfile(path):
                 self.assertEqual(os.stat(path).st_mode & 0o077, 0, name)
 
+    def test_it_runs_the_way_the_phone_runs_it(self):
+        """phone.py starts it with runpy, which does not put scripts/ on the import path; the simulated market imports
+        this file by name, so it must find itself (found on a phone-shaped run, not by the suite, which has scripts/ on the path)."""
+        import runpy
+        folder = tempfile.mkdtemp()
+        scripts = os.path.join(ROOT, "scripts")
+        saved_path, saved_argv, saved_module = list(sys.path), sys.argv, sys.modules.pop("generate_demo_data")
+        try:
+            sys.path[:] = [p for p in sys.path if os.path.abspath(p) != scripts]
+            sys.argv = ["generate_demo_data.py", folder]
+            quietly(runpy.run_path, os.path.join(scripts, "generate_demo_data.py"), None, "__main__")
+        finally:
+            sys.path[:], sys.argv = saved_path, saved_argv
+            sys.modules["generate_demo_data"] = saved_module
+        self.assertTrue(os.path.exists(os.path.join(folder, "universe.json")))
+
     def test_the_demo_server_keeps_apart_too(self):
         source = open(os.path.join(ROOT, "server.py")).read()
         self.assertIn("build_desk.keep_apart(Handler.folder)", source)

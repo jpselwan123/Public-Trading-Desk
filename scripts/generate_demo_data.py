@@ -11,8 +11,11 @@ Usage: python3 scripts/generate_demo_data.py [outdir]     (default: demo/)
 import math, os, random, sys
 from datetime import datetime, timedelta, timezone
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
+if HERE not in sys.path:               # the simulated market imports this file by name; the phone starts it with runpy
+    sys.path.insert(1, HERE)
 from env_config import atomic_write_json  # noqa: E402
 
 SEED = 212
