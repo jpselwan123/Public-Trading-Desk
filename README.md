@@ -112,7 +112,7 @@ Step by step for each broker, and the CSV column format: [`docs/BROKERS.md`](doc
 
 Six tabs:
 
-- **Overview**: what the account is worth, beside the same deposits put into the S&P 500 on the same days. What is new since you last looked: important filings, insider buys, rating changes, the biggest moves. The checks against your broker.
+- **Overview**: what the account is worth, drawn week by week beside the same deposits put into the S&P 500 on the same days (hover, touch or use the arrow keys to read any week). The line is drawn only while the rebuilt history ties to your broker's total. Press Ctrl/⌘+K, or `/`, to jump to any tab, section or company. What is new since you last looked: important filings, insider buys, rating changes, the biggest moves. The checks against your broker.
 - **Portfolio**: holdings, what you own by industry, what investing has cost (fees and tax withheld from dividends), dividends and cash.
 - **History**: the account year by year: money in and out, what it earned, and its return beside the S&P 500 with the same money. Each past year-end is rebuilt from the record and used only while the rebuild ties to your broker's total.
 - **Companies**: the companies you follow (up to 15) and every US company you hold:

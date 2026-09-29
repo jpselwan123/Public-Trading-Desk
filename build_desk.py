@@ -40,7 +40,7 @@ TEMPLATE = os.path.join(HERE, "desk_template.html")
 # may use at load only what the files before it declare.
 PAGE = os.path.join(HERE, "page")
 PAGE_STYLE = "desk.css"
-PAGE_SCRIPTS = ("core.js", "pages.js", "overview.js", "portfolio.js", "history.js", "companies.js", "filings.js", "sources.js",
+PAGE_SCRIPTS = ("core.js", "pages.js", "overview.js", "curve.js", "palette.js", "portfolio.js", "history.js", "companies.js", "filings.js", "sources.js",
                 "news.js", "screener.js", "trades.js", "research.js", "journal.js", "app.js")
 DIVIDEND_MONTHS = 24        # months shown in the dividend chart
 MAX_JOURNAL_CHARS = 2000

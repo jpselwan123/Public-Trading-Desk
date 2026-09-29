@@ -305,6 +305,12 @@ Six tabs with hash routing (`TABS` in the template), each one subject:
   record — shares at that day's close, cash from every movement — and used only while the same
   rebuild to today ties to the broker's total within `history.CHECK_TOLERANCE`; a year it cannot
   price says why.
+- **Overview's chart:** the account week by week against the S&P 500 with the same deposits
+  (`history.curve`, drawn by `page/curve.js` in plain SVG, no library and no request). It comes from the same rebuild
+  and only while it ties to the broker's total; the last point is the broker's own figure; a week without a close is
+  left out and the line is withheld, with its reason, if more than a fifth are.
+- **Quick jump** (`page/palette.js`, Ctrl/⌘+K or "/"): tabs, sections, companies and the two refresh buttons. It moves
+  about the page and sends nothing (`QuickJumpTests`).
 - **Companies:** a follow box and one sortable table of every company covered (price, the last
   day and the year against the market, the desk's rating, P/E against its own five years, next
   results, latest news); a row's click shows that company's card below. Then News, then Filings.

@@ -20,6 +20,9 @@ __PAGE_CSS__
         <label class="asof-pick" title="Show the desk as it was on a past day">
           <span>As of</span><input type="date" id="asofDate" aria-label="Show the desk as it was on a past day">
         </label>
+        <button class="jump-btn" id="jumpBtn" type="button" aria-label="Jump to a tab, a section or a company" title="Jump to (Ctrl or ⌘ + K)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg><span>Jump to</span>
+        </button>
         <button class="sync sync-btn" id="marketAt" type="button" title="Update the companies&rsquo; filings, prices and ratings now"></button>
         <span class="sync" id="synced">account not synced yet</span>
         <button class="refresh" id="refreshBtn" aria-label="Sync your account" title="Sync your account">
@@ -63,6 +66,11 @@ __PAGE_CSS__
           <div class="vs-line" id="vsLine"></div>
         </div>
         <div class="lines" id="flows"></div>
+      </div>
+      <div class="perf" id="perf" hidden>
+        <div class="perf-head" id="perfHead"><div class="perf-legend" id="perfLegend"></div><div class="seg" id="perfRange" role="group" aria-label="Range"></div></div>
+        <div class="perf-plot" id="perfPlot" tabindex="0" role="group" aria-label="The account against the S&amp;P 500, week by week. Left and right arrow keys move along it."></div>
+        <div class="perf-why" id="perfWhy"></div>
       </div>
       <div id="statsCard"><div class="stats" id="stats"></div></div>
     </div>
@@ -336,6 +344,16 @@ __PAGE_CSS__
   </section>
 
 </main>
+
+<!-- quick jump: Ctrl/⌘+K or "/" -->
+<div class="jump" id="jump" hidden>
+  <div class="jump-box" role="dialog" aria-modal="true" aria-label="Jump to">
+    <input id="jumpInput" type="text" role="combobox" aria-expanded="true" aria-controls="jumpList" aria-autocomplete="list"
+           placeholder="Jump to a tab, a section or a company" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <ul id="jumpList" role="listbox" aria-label="Matches"></ul>
+    <div class="jump-keys"><span>↑ ↓ to choose</span><span>Enter to go</span><span>Esc to close</span></div>
+  </div>
+</div>
 
 <!-- one dialog for writing a thesis before a company reports (Phase 9) -->
 <dialog id="thesisDlg" class="dlg" aria-labelledby="thTitle">

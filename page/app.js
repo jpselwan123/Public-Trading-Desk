@@ -118,7 +118,7 @@ document.addEventListener('focusout', () => setTimeout(() => { if (marketWaiting
 /* ---------------- boot ---------------- */
 function renderAll(){
   // by name, so one missing renderer can never blank the whole page
-  ['renderAsOf','renderHeader','renderHero','renderDigest','renderHealth','renderChecks','renderHeadlines','renderUpcoming',
+  ['renderAsOf','renderHeader','renderHero','renderPerformance','renderDigest','renderHealth','renderChecks','renderHeadlines','renderUpcoming',
    'renderHoldings','renderExposure','renderCosts','renderDividends','renderHistory','renderCompanies','renderCompanyNews','renderNews','reactionNote',
    'renderMix','renderCheckCard','renderPlans','renderClosed','renderHabits','renderTheses','renderTrades','renderPaper','renderBuyList','renderResearch','renderRatingRecord','renderScreener','renderNav'].forEach(name => {
     const fn = window[name];

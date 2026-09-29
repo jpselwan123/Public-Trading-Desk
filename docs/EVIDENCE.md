@@ -90,6 +90,7 @@ No study promises a return, and the most careful ones say the edges are small.
 | Returns money-weighted, never annualised under a year | GIPS |
 | The S&P 500 with the same money on the same days | A plain comparison: SPY's total return |
 | History's rebuilt years used while today's rebuild ties to the broker's total within 1% | The desk's choice, a check on the data, not a finding |
+| The performance chart: one point a week (`history.CURVE_STEP_DAYS`), the last point the broker's own total; weeks with no close left out, and the line withheld if more than a fifth are (`CURVE_MOST_SKIPPED`) | The desk's choice, a display resolution and a guard, not a finding. It is drawn only while History's check above passes |
 
 ## Checks on the data, the desk's own tolerances
 

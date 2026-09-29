@@ -44,6 +44,31 @@ class AccountTruthTests(unittest.TestCase):
                 self.assertAlmostEqual(d["vs_market"]["market_value"], L.spy_same_money(L.flows, L.end.isoformat()),
                                        delta=0.02)
 
+    def test_the_performance_curve_against_the_truth_every_week(self):
+        """The line the Overview draws (history.curve): each week's account value is the simulation's own for that
+        day, the S&P 500 beside it is what the same deposits would be worth that day, and the last point is
+        today's total and today's market figure, the ones the Overview states in words."""
+        for seed, ccy in CASES:
+            with self.subTest(seed=seed, currency=ccy):
+                L = ledger.Ledger(seed, ccy)
+                d = build(L)
+                c = d["history"]["curve"]
+                self.assertNotIn("why", c)
+                self.assertEqual(c["days"][0], L.flows[0][0])
+                self.assertEqual(c["days"][-1], L.end.isoformat())
+                self.assertEqual({len(c[k]) for k in ("days", "account", "market", "net")}, {len(c["days"])})
+                self.assertTrue(all(b > a for a, b in zip(c["days"], c["days"][1:])))
+                for day, account, market, net in zip(c["days"][:-1], c["account"], c["market"], c["net"]):
+                    trading = max(x for x in L.days if x.isoformat() <= day)
+                    self.assertAlmostEqual(account, L.value_on(trading), delta=max(0.1, account * 1e-5), msg=day)   # the record rounds shares
+                    flows = [(f, a) for f, a in L.flows if f <= day]
+                    self.assertAlmostEqual(net, sum(a for _, a in flows), places=6, msg=day)
+                    if market is not None:
+                        self.assertAlmostEqual(market, L.spy_same_money(flows, day), delta=max(0.1, market * 1e-5), msg=day)
+                self.assertAlmostEqual(c["account"][-1], d["account"]["total"], places=6)
+                self.assertAlmostEqual(c["market"][-1], d["vs_market"]["market_value"], delta=0.01)
+                self.assertEqual(c["currency"], ccy)
+
     def test_each_holding_and_the_account_by_industry_add_up(self):
         for seed, ccy in CASES[:4]:
             with self.subTest(seed=seed, currency=ccy):

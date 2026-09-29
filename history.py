@@ -25,6 +25,7 @@ For each calendar year:
 Only US shares have daily closes (Tiingo), so a year that ended with a line listed elsewhere
 held has no rebuilt value, and says why. The current year ends today, at Trading 212's total.
 """
+import bisect
 from datetime import date, timedelta
 
 import broker
@@ -111,14 +112,31 @@ def _short(ticker):
     return build_desk.short_ticker(ticker)
 
 
-def _value_on(day, fills, moves, prices, splits, fx):
+class _Closes:
+    """Each line's daily closes, read once and searched by day: the close on or before a day.
+    A curve of weekly values asks for the same few lines' closes hundreds of times."""
+
+    def __init__(self, prices):
+        self.prices, self.read = prices, {}
+
+    def on_or_before(self, short, day):
+        """(the day, its close), or (None, None) when the line has no close on or before `day`."""
+        if short not in self.read:
+            closes = price_store.series(self.prices, short, "c")
+            self.read[short] = (sorted(closes), closes)
+        days, closes = self.read[short]
+        i = bisect.bisect_right(days, day)
+        return (days[i - 1], closes[days[i - 1]]) if i else (None, None)
+
+
+def _value_on(day, fills, moves, prices, splits, fx, closes=None):
     """The account rebuilt at the close of `day`: (value, None), or (None, why) when a line held
     that day has no close the desk can use."""
-    held, why = _holdings_on(day, fills, prices, splits, fx)
+    held, why = _holdings_on(day, fills, prices, splits, fx, closes)
     return (None, why) if held is None else (sum(a for d, a in moves if d <= day) + held, None)
 
 
-def _holdings_on(day, fills, prices, splits, fx):
+def _holdings_on(day, fills, prices, splits, fx, closes=None):
     """The shares held at the close of `day`, at that close, in the account's currency: (value,
     None), or (None, why) when a line held has no close the desk can use."""
     import build_desk
@@ -128,8 +146,7 @@ def _holdings_on(day, fills, prices, splits, fx):
         short = _short(ticker)
         if not ticker.endswith("_US_EQ"):
             return None, f"{short} was held, and the desk has daily closes only for US shares"
-        closes = price_store.series(prices, short, "c")
-        on = max((d for d in closes if d <= day), default=None)
+        on, close = (closes or _Closes(prices)).on_or_before(short, day)
         if not on or on < earliest:
             return None, f"no close is stored for {short} at the end of {day[:4]}"
         rate = 1.0
@@ -137,7 +154,7 @@ def _holdings_on(day, fills, prices, splits, fx):
             rate = build_desk._on_or_before(fx, on)
             if not rate:
                 return None, f"no exchange rate is stored for {on}"
-        total += qty * closes[on] / rate
+        total += qty * close / rate
     return total, None
 
 
@@ -240,6 +257,49 @@ def check(fills, moves, unknown, positions, account, splits, today, source="Trad
             "tolerance": CHECK_TOLERANCE}
 
 
+CURVE_STEP_DAYS = 7          # one point a week: the shape of the account, light enough to draw
+CURVE_MOST_SKIPPED = 0.2     # weeks left out for want of a close, at most this share (the desk's choice); more is no line
+
+
+def curve(flows, fills, moves, prices, splits, fx, currency, today, total, checked):
+    """The account's value every week from the first deposit to today, beside what the same money
+    would be worth in the S&P 500 (build_desk.same_money_in_market, valued on each of those days)
+    and what has been put in net. Each week is rebuilt as a year's end is (`_value_on`), and only
+    while the rebuild ties to Trading 212's total (`check`); the last point is Trading 212's own.
+    {"days", "account", "market", "net", "currency", "skipped"}, or {"why": ...} when it cannot be drawn."""
+    import build_desk
+    if not checked or not checked["ok"]:
+        return {"why": (checked or {}).get("why") or "the account's value today is not known, so the weeks cannot be checked"}
+    if not total:
+        return {"why": "the account's value is not known for this day"}
+    closes = _Closes(prices)
+    last, day, days = today.isoformat(), date.fromisoformat(flows[0][0]), []
+    while day.isoformat() < last:
+        days.append(day.isoformat())
+        day += timedelta(days=CURVE_STEP_DAYS)
+    days.append(last)
+    out = {"days": [], "account": [], "market": [], "net": [], "currency": currency, "skipped": 0}
+    missing = None
+    for day in days:
+        if day == last:
+            value = total
+        else:
+            value, why = _value_on(day, fills, moves, prices, splits, fx, closes)
+            if value is None:                    # a week a held line has no close near: left out, its neighbours joined
+                out["skipped"] += 1
+                missing = missing or why
+                continue
+        upto = [(d, a) for d, a in flows if d <= day]
+        market, _, _ = build_desk.same_money_in_market(upto, prices, currency, day)
+        out["days"].append(day)
+        out["account"].append(round(value, 2))
+        out["market"].append(None if market is None else round(market, 2))
+        out["net"].append(round(sum(a for _, a in upto), 2))
+    if out["skipped"] > CURVE_MOST_SKIPPED * len(days):        # too many gaps to be a line: say why, draw nothing
+        return {"why": missing}
+    return out
+
+
 def build(raw, account, prices, today):
     """The years, oldest first, the totals and the check. None with no money ever put in."""
     import build_desk
@@ -320,6 +380,7 @@ def build(raw, account, prices, today):
     market, _, why_market = build_desk.same_money_in_market(flows, prices, currency) if total else (None, None, None)
     both = build_desk.money_weighted_return(flows, market, today.isoformat()) if market is not None else None
     return {"years": years, "currency": currency, "since": first, "check": checked,
+            "curve": curve(flows, fills, moves, prices, splits, fx, currency, today, total, checked),
             "total": {"deposited": deposited, "withdrawn": withdrawn,
                       "earned": total - (deposited - withdrawn) if total else None,
                       "return": whole, "market": {"value": market, "return": both, "difference": total - market}

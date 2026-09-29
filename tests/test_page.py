@@ -1161,5 +1161,50 @@ class IntervalPageTests(unittest.TestCase):
         self.assertNotIn("sells_gain", build_desk.build_trades([], {}))
 
 
+class QuickJumpTests(unittest.TestCase):
+    """Ctrl/\u2318+K (page/palette.js): a way to move about the page. It reads nothing new and sends nothing."""
+
+    def source(self):
+        return open(os.path.join(ROOT, "page", "palette.js"), encoding="utf-8").read()
+
+    def test_it_is_in_the_page_before_the_script_that_starts_it(self):
+        scripts = build_desk.PAGE_SCRIPTS
+        self.assertLess(scripts.index("pages.js"), scripts.index("palette.js"))       # it uses TABS and showPage at load
+        self.assertLess(scripts.index("palette.js"), scripts.index("app.js"))
+        page = page_source()
+        for ident in ("jumpBtn", "jump", "jumpInput", "jumpList"):
+            self.assertIn('id="%s"' % ident, page)
+
+    def test_it_only_moves_about_the_page(self):
+        code = self.source()
+        for reaching in ("fetch(", "XMLHttpRequest", "sendBeacon", "localStorage", ".post(", "innerHTML = DATA"):
+            self.assertNotIn(reaching, code, reaching)
+        # its two actions press a button the page already has; nothing of its own is sent
+        self.assertIn("[['refreshBtn', 'Sync your account'], ['marketAt', 'Update the companies now']]", code)
+        for ident in ("refreshBtn", "marketAt"):
+            self.assertIn('id="%s"' % ident, page_source())
+
+    def test_its_rows_come_from_the_tabs_and_the_companies_the_page_has(self):
+        code = self.source()
+        self.assertIn("TABS.map(", code)
+        self.assertIn("DATA.companies", code)
+        for section in re.findall(r"\{page:'(\w+)'", code):
+            if section != "orders":                         # the order path is the private desk's alone
+                self.assertIn('id="page-%s"' % section, page_source(), section)
+        self.assertIn("el && !el.hidden", code)              # a section the page lacks, or has hidden, is not offered
+
+    def test_typed_text_is_escaped_and_the_slash_key_leaves_a_field_alone(self):
+        code = self.source()
+        self.assertIn("esc(r.label)", code)
+        self.assertIn("esc(r.note)", code)
+        self.assertIn("!typing", code)                        # "/" typed into the follow box or a note is text
+        self.assertIn("Escape", code)
+
+    def test_it_respects_reduced_motion_and_the_text_floor(self):
+        css = page_source()
+        self.assertIn(".jump-box{animation:none;}", css)
+        self.assertIn("body.jumping{overflow:hidden;}", css)
+
+
 if __name__ == "__main__":
     unittest.main()

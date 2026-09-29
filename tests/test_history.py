@@ -72,6 +72,66 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(h["total"]["return"], build_desk.money_weighted_return(
             build_desk.external_flows(self.account()["transactions"]), 1669.0, self.TODAY.isoformat()))
 
+    def dense(self):
+        """The example account's prices with a close every day, as Tiingo gives them."""
+        prices, day = self.prices(), date(2024, 3, 4)
+        aaa = {}
+        while day <= self.TODAY:
+            d = day.isoformat()
+            aaa[d] = close(50.0 if d < "2024-12-31" else 60.0 if d < "2025-06-02" else 30.0 if d < "2025-12-31" else 45.0)
+            day += timedelta(days=1)
+        aaa["2025-06-02"] = dict(close(30.0), s=2.0)
+        aaa["2026-03-02"] = close(48.0)
+        return dict(prices, AAA=aaa)
+
+    def test_the_weekly_curve_by_hand(self):
+        """The example account, week by week from the first deposit: the value rebuilt at each week's close, the S&P 500
+        beside it with the same deposits, what was put in net, and today's point Trading 212's own."""
+        c = self.build(self.account(), self.dense())["curve"]
+        self.assertNotIn("why", c)
+        self.assertEqual(c["skipped"], 0)
+        self.assertEqual(c["days"][:3], ["2024-03-01", "2024-03-08", "2024-03-15"])
+        self.assertEqual(c["days"][-1], "2026-03-02")
+        self.assertEqual(c["account"][0], 1000.0)                     # the deposit, nothing bought yet
+        self.assertEqual(c["account"][1], 999.0)                      # 499 cash + 10 x 50 (the 4 Mar close)
+        self.assertEqual(c["market"][:2], [1000.0, 1000.0])           # 10 units at 100, the only close stored
+        self.assertEqual(c["net"][:2], [1000.0, 1000.0])
+        self.assertEqual(c["account"][-1], 1669.0)
+        self.assertAlmostEqual(c["market"][-1], (1000 / 100 + 200 / 112) * 120, places=2)
+        self.assertEqual(c["net"][-1], 1200.0)
+        after = [k for k, d in enumerate(c["days"]) if d >= "2025-02-03"][0]
+        self.assertEqual(c["net"][after], 1200.0)                     # the second deposit counts from its day
+        self.assertEqual(c["net"][after - 1], 1000.0)
+
+    def test_the_curve_is_withheld_when_the_rebuild_does_not_tie(self):
+        """A week is drawn only while the rebuild ties to Trading 212's total, as a year's end is."""
+        c = self.build(self.account(total=2500.0), self.dense())["curve"]
+        self.assertEqual(list(c), ["why"])
+        self.assertTrue(c["why"])
+
+    def test_a_few_weeks_without_a_close_are_left_out_and_the_rest_still_draw(self):
+        prices = self.dense()
+        for gone in ("2024-04-08", "2024-04-15", "2024-04-22", "2024-04-29", "2024-05-06", "2024-05-13"):
+            for d in [x for x in prices["AAA"] if gone <= x < (date.fromisoformat(gone) + timedelta(days=7)).isoformat()]:
+                del prices["AAA"][d]
+        c = self.build(self.account(), prices)["curve"]
+        self.assertNotIn("why", c)                       # ten days' gap is more than a week's slack: those weeks are skipped
+        self.assertGreater(c["skipped"], 0)
+        self.assertEqual(len(c["days"]), len(set(c["days"])))
+        self.assertTrue(all(b > a for a, b in zip(c["days"], c["days"][1:])))
+
+    def test_many_weeks_without_a_close_withhold_the_line_and_say_why(self):
+        prices = self.dense()
+        for d in [x for x in prices["AAA"] if "2024-03-15" <= x <= "2024-11-30"]:
+            del prices["AAA"][d]
+        c = self.build(self.account(), prices)["curve"]
+        self.assertEqual(list(c), ["why"])
+        self.assertTrue(c["why"])
+
+    def test_a_week_with_a_line_that_has_no_close_says_why_instead_of_drawing_a_gap(self):
+        c = self.build(self.account(), prices={"SPY": self.prices()["SPY"]})["curve"]
+        self.assertEqual(list(c), ["why"])
+
     def test_a_movement_missing_from_the_history_withholds_every_rebuilt_year(self):
         """Rebuilt without the $200 of 2025, today comes to 1,469 against Trading 212's 1,669: some
         movement of money is not in the history, so no rebuilt value is trusted, and each year says so."""
