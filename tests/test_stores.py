@@ -116,6 +116,51 @@ class DamagedStoreTests(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertEqual(paper.load(os.path.join(folder, "paper.json"))["cash"], paper.START_CASH)
 
+class PrivateFileTests(unittest.TestCase):
+    """Every file the desk writes holds something of the user's (holdings, what they follow,
+    their notes), so each is readable by its owner alone, whatever the umask."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.umask = os.umask(0o022)                  # the usual default: files come out world-readable
+
+    def tearDown(self):
+        os.umask(self.umask)
+
+    def mode(self, name):
+        return oct(os.stat(os.path.join(self.folder, name)).st_mode & 0o777)
+
+    def test_a_written_file_is_private_and_so_is_one_it_replaces(self):
+        path = os.path.join(self.folder, "store.json")
+        env_config.atomic_write_json(path, {"a": 1})
+        self.assertEqual(self.mode("store.json"), "0o600")
+        os.chmod(path, 0o644)                                       # an older desk left it readable
+        with open(path + ".tmp", "w") as f:                         # ... and a crash left a temp file behind
+            f.write("half")
+        os.chmod(path + ".tmp", 0o644)
+        env_config.atomic_write_json(path, {"a": 2})
+        self.assertEqual((self.mode("store.json"), json.load(open(path))), ("0o600", {"a": 2}))
+        self.assertFalse(os.path.exists(path + ".tmp"))
+
+    def test_the_page_and_its_data_are_private(self):
+        with open(os.path.join(self.folder, "t212_data.json"), "w") as f:
+            json.dump(generate_demo_data.generate(TODAY), f)
+        with contextlib.redirect_stdout(io.StringIO()):
+            build_desk.main([self.folder])
+        for name in ("index.html", "desk_data.json"):
+            self.assertEqual(self.mode(name), "0o600", name)
+
+    def test_nothing_but_atomic_write_creates_a_file(self):
+        """The one place that makes files private is the one place files are made: a module that
+        opened its own for writing would leave the umask to decide who can read it."""
+        allowed = {"env_config.py", "phone.py"}                     # phone.py sets 0600 on what it writes
+        for name in sorted(os.listdir(ROOT)):
+            if name.endswith(".py") and name not in allowed:
+                with open(os.path.join(ROOT, name)) as f:
+                    text = f.read()
+                self.assertIsNone(re.search(r"open\([^)]*['\"](?:w|wb|a|x)['\"]", text), name)
+
+
 class StepFaultTests(unittest.TestCase):
     def test_a_fault_in_one_step_fails_that_step_alone(self):
         """A fault in the desk's own code used to stop the whole update at that step; now the

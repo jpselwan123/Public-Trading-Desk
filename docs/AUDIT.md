@@ -103,3 +103,39 @@ the figure at your broker before relying on the desk's.**
   moves have fat tails, so somewhat more than one day in twenty is marked.
 - Closed trades are matched first in, first out; Trading 212 uses the average price. The page
   says so.
+
+## Second audit, 29 September 2026: security, privacy and the public copy
+
+The first audit was about numbers. This one asked whether the desk is safe to point at a
+brokerage account, and whether this public copy is the private desk with only the order code
+and the personal context taken out.
+
+**How it was checked.**
+- A clean clone of the public repository, run the way the README says: all tests on Python 3.9,
+  3.10, 3.11, 3.12 and 3.13, then `./desk.sh --demo`, then `git status` to see what a run leaves
+  behind (nothing).
+- Static analysis of both codebases (undefined names, syntax, unused code; the page's scripts as
+  one program). Every page element the scripts look up exists.
+- The two codebases compared by structure, ignoring comments and docstrings: only 8 Python files
+  differ in code, all of it the order path, wording, or the items below. The test suites compared
+  by name and body: the 93 tests only the private desk has are all about orders.
+- A live server sent hostile requests: another site's Host and Origin, DNS-rebinding names,
+  path traversal, oversized and malformed bodies, bad dates. Every one was refused.
+- A full simulated update run under seven failure modes with recognisable fake keys set, then
+  every file the desk writes, its output and its report searched for the keys: none found.
+- A real browser loaded the page built from poisoned inputs (attack text in every name, headline,
+  label, note, currency and link a broker or a news feed can supply).
+
+**What was wrong, and is fixed.**
+
+| Found | Why it mattered | Fixed |
+|---|---|---|
+| The page fetched two web fonts from Google each time it opened. | A page showing an account made a request to a third party. | Uses the system's fonts; a test fails if the page loads anything from outside. |
+| A currency code the browser did not recognise was printed into the page unescaped, and nothing checked what a broker file called a currency or a symbol. | A hostile CSV could have injected script into the page. It was the only path found. | The fallback is escaped; currencies, symbols and markets are checked where a broker's data is read, with the line number. |
+| The list of keys blanked from errors (and from the `doctor.py` report meant for pasting) named Trading 212's, Tiingo's, Finnhub's and OpenAI's, not Alpaca's or Interactive Brokers'. | An error quoting one of them would have shown it. None does today. | All are listed, and a test ties the list to the broker registry. |
+| Files holding holdings, follow lists and trades were readable by other users of a shared computer. | Only the account file and the notes were private. | Every file is written readable by its owner alone; a test stops any other way of creating files. |
+| A desk with no keys reported ten red failures. | To a newcomer it looked broken, and it made a broker sound compulsory. | A key not added yet is a step to take, said calmly, and the desk says plainly that it works with no broker. |
+
+**Not a finding, but worth saying.** The page inserts some strings from Python as HTML (interval
+wording, fixed labels). Those are built from numbers and constants, never from outside text;
+every piece of outside text goes through `esc()`.

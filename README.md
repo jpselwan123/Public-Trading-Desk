@@ -27,7 +27,7 @@ Connect **Trading 212**, **Alpaca**, **Interactive Brokers**, or **any broker th
 
 You shouldn't have to take anyone's word, mine included, so the desk is built to be checked and to need as little from you as possible:
 
-- **Start with nothing.** `./desk.sh --demo` needs no keys. A CSV export (`BROKER=csv`) needs no key and no connection to your broker at all. Only then, if you want, add an API key.
+- **A broker is optional.** Without one, the desk still gives you the research side: companies, filings, news, the rating and the screener. Connecting one only adds *your* portfolio. And you can start with less than a key: `./desk.sh --demo` needs none, and a CSV export (`BROKER=csv`) needs no key and no connection to your broker at all. Only then, if you want, add an API key.
 - **Give it a key that can't trade.** A Trading 212 key made without the *Orders* permission is refused by Trading 212 itself if anything tried to trade, whatever the code does. Interactive Brokers' Flex reports have no trading access. Alpaca has no read-only key, so try it on a paper account first.
 - **There is no service.** No website to sign up to, no account, no server run by the author, no analytics or telemetry. The desk is a program on your computer serving a page to your own browser, and the page loads nothing from the internet.
 - **Every destination is listed.** [`docs/NETWORK.md`](docs/NETWORK.md) is the complete list of hosts the desk talks to, what each is sent and when. A test fails if the code gains a destination that isn't listed there.
@@ -60,7 +60,18 @@ The page opens at <http://127.0.0.1:8935/>. It is the same page your own account
 
 Works on macOS and Linux. On Windows, use WSL. On a Mac, `./native_app/build.sh --install` also builds a small **Trading Desk.app** for the Dock (it expects the desk in `~/trading-desk`).
 
-## Connect your broker
+## Use it without a broker
+
+You don't need one to use the desk. With no account connected, the Overview says so and points you to what works:
+
+1. `cp .env.example .env && chmod 600 .env`, then set `SEC_CONTACT=` to your email address in `.env`. The SEC asks automated requests to name a contact, and your address goes to the SEC alone.
+2. `./desk.sh`, then follow any US company on the **Companies** tab.
+
+That alone gives you each company's filings and financials, the two scoring models, the ranking in its industry, and the screener over every US company that files with the SEC. Free [Tiingo](https://www.tiingo.com) and [Finnhub](https://finnhub.io) keys add prices, the price ratios and the value and momentum parts of the rating, results dates and news.
+
+## Connect your broker (optional)
+
+Only if you want your own portfolio, history and trade checks on the page.
 
 | Broker | How it connects | Status |
 |---|---|---|

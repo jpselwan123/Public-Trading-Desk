@@ -13,7 +13,7 @@ day's page shows none of it (asof.py).
 import json, os
 from datetime import datetime, timezone
 
-from env_config import scrub
+from env_config import SETUP_STEPS, scrub
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HEALTH_FILE = "health.json"
@@ -42,12 +42,15 @@ def record(stored, part, timed, failed, now=None):
         steps[name] = {"ok": ok, "at": now, "seconds": round(float(seconds or 0), 1),
                        "why": None if ok else scrub(why[name])[:300],
                        "last_ok": now if ok else (steps.get(name) or {}).get("last_ok")}
+        if not ok and why[name] in SETUP_STEPS:
+            steps[name]["setup"] = True                # it only lacks a key: waiting for it, not failed
     stored[part] = {"at": now, "steps": steps}
     return stored
 
 
 def for_page(stored):
-    """Each part's last run and its steps, in the order they ran, with how many failed."""
+    """Each part's last run and its steps, in the order they ran, with how many failed and how
+    many are only waiting for a key to be added."""
     out = []
     for part, label in PARTS:
         run = (stored or {}).get(part)
@@ -55,5 +58,6 @@ def for_page(stored):
             continue
         steps = [dict(v, name=k) for k, v in (run.get("steps") or {}).items()]
         out.append({"part": part, "label": label, "at": run.get("at"), "steps": steps,
-                    "failed": sum(1 for s in steps if not s.get("ok"))})
+                    "failed": sum(1 for s in steps if not s.get("ok") and not s.get("setup")),
+                    "waiting": sum(1 for s in steps if not s.get("ok") and s.get("setup"))})
     return out

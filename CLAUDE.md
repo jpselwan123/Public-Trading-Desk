@@ -74,7 +74,17 @@ python3 doctor.py [--account|--offline]              # the health report: safe t
 - **Privacy.** Never commit `.env`, `t212_data.json`, `account.csv`, `desk_data.json`,
   `journal.json`, `index.html` or any other store in `.gitignore`. The account number is dropped
   at sync. Tests and screenshots use `scripts/generate_demo_data.py`. Keys stay in `.env`: never
-  printed, logged or sent to the page.
+  printed, logged or sent to the page, and every key a broker adds goes in `env_config.SECRET_NAMES`
+  so `scrub` blanks it from any error (`test_every_brokers_secrets_are_blanked...` ties the two).
+  - Every file the desk writes is made by `env_config.atomic_write`, readable by its owner alone
+    (0600); nothing else opens a file for writing (`PrivateFileTests`).
+  - The page loads nothing from the internet, and every host the code names is in
+    `docs/NETWORK.md` (`tests/test_network.py`). A new destination is documented in the same change.
+  - Text from outside (a broker file, a news feed, a filing) reaches the page only through `esc()`.
+    What a broker supplies as a currency, symbol or market is checked where it is read
+    (`broker.currency_code`, `broker.line_code`) and refused with its line number if it is not one.
+    Strings in `DATA` that the page inserts as HTML are composed by Python from numbers and fixed
+    labels, never from outside text.
 - **The account only when the user syncs; the company data by itself.** Two refreshes, apart
   (`POST /refresh {part}`):
   - `account` is the broker alone (`server.refresh_account`, through `broker.configured()`), only
@@ -119,7 +129,13 @@ python3 doctor.py [--account|--offline]              # the health report: safe t
   average cost, in the account's currency, splits counted; an export's holdings and totals, marked
   `derived`). The page names the broker (`brokerName()`, `DATA.broker`) and shows its connect
   steps from `broker.BROKERS`. A new broker needs an adapter, an exporter in `tests/ledger.py`
-  and a truth test in `tests/test_brokers.py`. `docs/BROKERS.md`.
+  and a truth test in `tests/test_brokers.py`. `docs/BROKERS.md`, `docs/ADDING-A-BROKER.md`.
+- **A broker is optional.** With none connected the desk is still a working desk: the Overview says
+  so (the card in `renderHeader`, its wording data from `broker.for_page`: it names no broker until
+  keys, a `BROKER` or an account say one was chosen), Companies and Research need no account, and a
+  key not yet added is a step to take, not a failure (`env_config.SETUP_STEPS`; `refresh_market`
+  reports them apart as `setup`, `health.py` as `waiting`). The connection steps show once keys
+  are in `.env`.
 - **Diagnose from the user's report, not a guess.** A development container may not reach the
   SEC, Tiingo, Finnhub or a broker; the user's machine can. `doctor.py` prints the code version,
   which keys are set (never their values; any that appears in an error is blanked), each source

@@ -11,7 +11,7 @@ reading them:
   in that study. The value here is seeing how opinion is *changing*, and against
   what the company actually reports.
 """
-import json, os, sys
+import os, sys
 from datetime import datetime, timezone
 from earnings import EarningsError, api_key, fetch
 from env_config import atomic_write_json, fetched_today

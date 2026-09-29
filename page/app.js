@@ -95,8 +95,12 @@ async function updateMarket(pressed){
     if (!r.ok){ if (pressed) say((await r.json()).message || ''); return; }
     const res = await readLines(r, ev => { if (pressed && ev.step && ev.state === 'running') say('Updating companies: ' + ev.step.toLowerCase() + '…'); });
     if (!res) throw new TypeError('no result');
+    // keys not added yet are said apart from what failed: the desk is waiting for them, not broken
+    const setup = res.setup || [];
     $('marketMsg').classList.toggle('progress', !res.message);
-    say(res.message ? 'Companies updated, except ' + res.message : '');
+    say((res.message ? 'Companies updated, except ' + res.message + (setup.length ? '. Also to do: ' : '') : '') +
+        (!res.message && setup.length ? 'Company data is waiting for a few free keys (README: Use it without a broker). ' : '') +
+        setup.join('; '));
     marketRunning = false;
     await showMarket();
   } catch(err){

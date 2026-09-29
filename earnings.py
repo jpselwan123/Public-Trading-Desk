@@ -10,7 +10,7 @@ Usage: python3 earnings.py [TICKER ...]
 """
 import json, os, sys, time, urllib.error, urllib.request
 from datetime import datetime, timedelta, timezone
-from env_config import load_env, atomic_write_json, fetched_today, unpacked
+from env_config import load_env, atomic_write_json, fetched_today, unpacked, NO_FINNHUB_KEY
 from news import FOLLOW_USAGE, load_watchlist
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -29,7 +29,7 @@ def api_key():
     load_env(os.path.join(HERE, ".env"))
     key = os.environ.get("FINNHUB_API_KEY", "").strip()
     if not key:
-        raise EarningsError("Add FINNHUB_API_KEY=… to .env (free key from finnhub.io)")
+        raise EarningsError(NO_FINNHUB_KEY)
     return key
 
 

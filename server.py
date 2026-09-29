@@ -23,14 +23,14 @@
 Requests from other websites are refused (Host and Origin must be this server), so a
 page elsewhere can't trigger a refresh or write notes. The one other way in is opt-in:
 the Mac's Tailscale name, set in .env as DESK_HOSTS, for the user's own phone to open
-this desk through `tailscale serve` (docs/ONE-DESK.md). Orders are never taken that way.
+this desk through `tailscale serve` (docs/ONE-DESK.md).
 
 Usage: python3 server.py [--demo]     then open http://127.0.0.1:8935/
 """
 import json, os, re, subprocess, sys, threading, time, traceback
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from env_config import atomic_write_json, load_env, read_for_writing, UnreadableStore, PARTLY, scrub
+from env_config import atomic_write_json, load_env, read_for_writing, UnreadableStore, PARTLY, SETUP_STEPS, scrub
 import analysts, asof, brief, broker, build_desk, context, diffs, earnings, fundamentals, headlines, health, looks, news, paper, plans, prices, rating, research, screen, sectors, summarise, t212, thesis, trade_check, universe, value
 
 HOST, PORT = "127.0.0.1", 8935
@@ -235,7 +235,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": "the body must be a JSON object"})
         path = self.path.split("?", 1)[0]
         if path == "/refresh":
-            # {"part": "account"} syncs Trading 212; {"part": "market"} the company data.
+            # {"part": "account"} syncs the broker; {"part": "market"} the company data.
             # Sent with neither (an older page, ./refresh.sh's habit), it is the account.
             part = body.get("part") if body.get("part") in ("account", "market") else "account"
             lock, work = ((account_lock, self.refresh_account) if part == "account"
@@ -354,7 +354,10 @@ class Handler(BaseHTTPRequestHandler):
         if not self.demo:
             self.record_health("market", timed, problems)
         self.build()
-        return 200, {"ok": True, "message": self.failures(problems), "timing": timing(timed)}
+        # a key not added yet is a step to take, said apart from what failed
+        failed = [p for p in problems if p[1] not in SETUP_STEPS]
+        setup = list(dict.fromkeys(why for _, why in problems if why in SETUP_STEPS))
+        return 200, {"ok": True, "message": self.failures(failed), "setup": setup, "timing": timing(timed)}
 
     def sync_account(self):
         """t212.py in its own process, as ./refresh.sh runs it; on a phone, in this one. Another

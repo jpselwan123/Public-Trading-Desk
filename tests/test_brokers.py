@@ -181,6 +181,28 @@ class CsvTests(unittest.TestCase):
             self.sync(os.path.join(tempfile.mkdtemp(), "missing.csv"))
         self.assertIn("docs/BROKERS.md", str(cm.exception))
 
+    def test_a_currency_or_symbol_that_is_not_one_stops_the_import_and_names_its_line(self):
+        """What a file calls a currency or a stock ends up on the page. A file can come from
+        anywhere, so anything but a currency code and a symbol is refused where it is read."""
+        head = "date,type,symbol,quantity,price,currency,amount\n2025-01-02,deposit,,,,,1000\n"
+        for row, wanted in (("2025-01-03,buy,AAPL,1,100,USD<img src=x onerror=alert(1)>,100", "export.csv:3"),
+                            ("2025-01-03,buy,AAPL,1,100,DOLLARS,100", "not a currency code"),
+                            ("2025-01-03,buy,<script>alert(1)</script>,1,100,EUR,100", "not a symbol"),
+                            ("2025-01-03,buy,AAPL\"onmouseover=\"x,1,100,EUR,100", "not a symbol"),
+                            ("2025-01-03,dividend,A<B,1,,EUR,5", "export.csv:3")):
+            _, path = self.write(head + row + "\n")
+            with self.assertRaises(broker.BrokerError, msg=row) as cm:
+                self.sync(path)
+            self.assertIn(wanted, str(cm.exception), row)
+        _, path = self.write(head)
+        with self.assertRaises(broker.BrokerError) as cm:
+            self.sync(path, BROKER_CURRENCY="EUR<b>")
+        self.assertIn("BROKER_CURRENCY", str(cm.exception))
+        _, path = self.write(head + "2025-01-03,buy,BRK.B,1,100,eur,100\n2025-01-04,buy,0005,1,10,hkd,10\n")
+        raw = self.sync(path)                                     # real symbols and lower-case codes are fine
+        self.assertEqual(sorted(o["order"]["ticker"] for o in raw["orders"]), ["0005_US_EQ", "BRK-B_US_EQ"])
+        self.assertEqual(sorted(o["order"]["instrument"]["currency"] for o in raw["orders"]), ["EUR", "HKD"])
+
     def test_overlapping_exports_count_a_row_once_and_two_like_trades_twice(self):
         head = "date,type,symbol,quantity,price,currency,amount\n"
         folder, _ = self.write(head + "2025-01-02,deposit,,,,,1000\n2025-01-03,buy,AAPL,1,100,EUR,100\n"
@@ -361,6 +383,42 @@ class BrokerWiringTests(unittest.TestCase):
         self.assertEqual(broker.line_code("VUSA", "LSE"), "VUSA_LSE_EQ")
         self.assertEqual(build_desk.short_ticker(broker.line_code("VUSA", "LSE")), "VUSA")
 
+    def test_a_desk_with_no_broker_is_a_working_desk_that_only_asks_once_keys_are_begun(self):
+        """The page tells someone who has connected nothing that the desk works as it is (Companies and
+        Research need no broker), and only shows the connection steps once keys are in .env. It is told
+        whether they are, never what they are."""
+        none = broker.for_page(None, None, None, {})
+        self.assertEqual((none["key"], none["keys_set"], none["problem"]), ("trading212", False, None))
+        half = broker.for_page(None, "trading212", None, {"T212_API_KEY": "abc"})
+        self.assertFalse(half["keys_set"])                                   # a key without its secret is not begun
+        both = broker.for_page(None, "trading212", None, {"T212_API_KEY": "abc", "T212_API_SECRET": "def"})
+        self.assertTrue(both["keys_set"])
+        self.assertTrue(broker.for_page(None, "csv", None, {"BROKER_CSV": "account.csv"})["keys_set"])
+        # Trading 212 is only the default: nothing is named until keys, an account or a problem say so
+        self.assertEqual((none["name"], half["name"], both["name"]), ("your broker", "your broker", "Trading 212"))
+        self.assertEqual(broker.for_page(None, "trading212", "BROKER=x is not one the desk reads", {})["name"], "Trading 212")
+        self.assertEqual(broker.for_page({"summary": {"currency": "USD"}, "broker": "csv"}, None, None, {})["name"],
+                         "your broker")                                       # an export with no name given keeps its own default
+        self.assertEqual(broker.for_page({"summary": {"currency": "USD"}}, None, None, {})["name"], "Trading 212")
+        self.assertEqual(broker.for_page(None, "ibkr", None, {"BROKER": "ibkr"})["name"], "Interactive Brokers")   # chosen, no keys yet
+        self.assertEqual(len(none["choices"]), len(broker.BROKERS))
+        for spec, choice in zip(broker.BROKERS.values(), none["choices"]):
+            self.assertIn(": ", choice)                                       # "Name: how", the page bolds the name
+        self.assertIn("no key at all", none["choices"][-1])
+        self.assertFalse(broker.for_page(None, "alpaca", None, {"ALPACA_API_KEY": "  "})["keys_set"])
+        for shown in (none, half, both):                                     # a value never reaches the page
+            self.assertNotIn("abc", json.dumps(shown))
+            self.assertNotIn("def", json.dumps(shown))
+        template = open(os.path.join(ROOT, "desk_template.html")).read()
+        for element in ('id="setupLead"', 'id="setupHow"', 'id="setupHowTitle"', 'id="setupSteps"'):
+            self.assertIn(element, template)
+        overview = open(os.path.join(ROOT, "page", "overview.js")).read()
+        self.assertIn("!DATA.connected && !B.problem && !B.keys_set", overview)
+        for said in ("No broker connected: that is fine", "It only reads.", "Every site the desk talks to",
+                     "A CSV export needs none", "Connect a broker (optional)"):
+            self.assertIn(said, overview)
+        self.assertTrue(os.path.exists(os.path.join(ROOT, "docs", "NETWORK.md")))     # the page points at it
+
     def test_trading_212s_sync_is_its_own_as_before(self):
         """With Trading 212 named or none, the sync is t212.py's, exactly as it was."""
         source = inspect.getsource(broker.sync_to_file)
@@ -381,6 +439,55 @@ class BrokerWiringTests(unittest.TestCase):
             for never in (".post(", "POST", "DELETE", "PATCH", "PUT"):
                 self.assertNotIn(never, text, name)
         self.assertEqual(broker_alpaca.Client.PATHS, ("/v2/account", "/v2/positions", "/v2/account/activities"))
+
+    def test_every_brokers_secrets_are_blanked_wherever_they_turn_up(self):
+        """doctor.py's report is written to be pasted into a public issue, and a failed step's
+        reason goes on the page and into health.json: a key that an error quotes is blanked
+        (env_config.scrub) for every broker, not only the first the desk knew."""
+        not_secret = {"IBKR_FLEX_QUERY", "BROKER_CSV"}                 # a report's number, a file's name
+        for key, spec in broker.BROKERS.items():
+            for name in spec["keys"]:
+                if name not in not_secret:
+                    self.assertIn(name, env_config.SECRET_NAMES, f"{key}: {name} would show in an error")
+        env = {"ALPACA_API_KEY": "PKTESTKEY0123456789", "ALPACA_API_SECRET": "alpacaSecretValue0123456789abcdef",
+               "IBKR_FLEX_TOKEN": "918273645500", "T212_API_KEY": "t212-key-0123456789"}
+        for name, value in env.items():
+            said = env_config.scrub(f"the broker answered: rejected {value} for this account", env)
+            self.assertNotIn(value, said, name)
+        url = "https://ndcdyn.interactivebrokers.com/x/SendRequest?t=918273645500&q=1234&v=3"
+        self.assertNotIn("918273645500", env_config.scrub(url, {}))     # the address form, whatever .env holds
+        self.assertIn("q=1234", env_config.scrub(url, {}))              # the report's number is no secret
+
+    def test_symbols_markets_and_currencies_are_checked_where_every_broker_writes_them(self):
+        for good in ("AAPL", "brk.b", "BRK/B", "BRK B", "RDS-A", "0005", "600519", "SPY"):
+            self.assertRegex(broker.line_code(good), r"^[A-Z0-9-]+_US_EQ$")
+        self.assertEqual(broker.line_code("VUSA", "lse"), "VUSA_LSE_EQ")
+        for bad in ("", "  ", "<img src=x>", "A;B", "AAPL'--", "X" * 40, "é", "A&B"):
+            with self.assertRaises(broker.BrokerError, msg=repr(bad)):
+                broker.line_code(bad)
+        for market in ("L S E", "US<b>", "X" * 30):
+            with self.assertRaises(broker.BrokerError, msg=market):
+                broker.line_code("VUSA", market)
+        self.assertEqual([broker.currency_code(c) for c in ("usd", " EUR ", "GBX")], ["USD", "EUR", "GBX"])
+        for bad in (None, "", "US", "USDX", "US<img>", "1234", "€"):
+            with self.assertRaises(broker.BrokerError, msg=repr(bad)):
+                broker.currency_code(bad)
+        rec = broker.Record("alpaca", "usd")                        # the account's own, and each line's price
+        with self.assertRaises(broker.BrokerError):
+            broker.Record("alpaca", "USD<img>")
+        with self.assertRaises(broker.BrokerError):
+            rec.trade("1", "2025-01-03T12:00:00Z", "AAPL_US_EQ", "BUY", 1, 1, 1, price_currency="x<y>")
+        with self.assertRaises(broker.BrokerError):
+            rec.position("AAPL_US_EQ", 1, 1, 1, price_currency="x<y>")
+
+    def test_a_currency_the_browser_does_not_know_is_printed_as_text(self):
+        """money() and priceIn() fall back to printing the code when Intl refuses it; the page puts
+        their answer into HTML, so the code is escaped there (found by putting an attack payload
+        into every text a broker can supply and loading the page in a browser)."""
+        core = open(os.path.join(ROOT, "page", "core.js")).read()
+        self.assertIn("abs.toFixed(2) + ' ' + esc(cur)", core)
+        self.assertIn("toFixed(2) + ' ' + esc(cur || '')", core)
+        self.assertNotIn("' ' + cur;", core)
 
     def test_another_brokers_sync_reads_it_and_builds_the_page(self):
         folder = tempfile.mkdtemp()

@@ -192,7 +192,7 @@ momentum's edge there is negative once the benchmark is measured properly.
 
 # Pre-registration — v3 amendments, 22 September 2026
 
-Written after an external review (`docs/history/REVIEW-2026-09-21.md`), before re-running.
+Written after an external review (21 September 2026), before re-running.
 v1 and v2 stay exactly as they were; these changes apply from here on and the previous
 results remain in the repository.
 
@@ -349,7 +349,7 @@ nothing here is remotely that large.
 ## v3-D — the risk track stops gating on its noisiest number (review H-03)
 
 **Status: PROPOSED, written before the run.** Raised by an external review
-(`docs/history/REVIEW-2026-09-23.md`, H-03), not chosen after seeing a result. Approved by the
+(the review of 23 September 2026, H-03), not chosen after seeing a result. Approved by the
 account owner, 23 September 2026. v1, v2, v3-A, v3-B and v3-C stay exactly as they are.
 
 After v3-C the risk track tested three things, and the one that defined the track was

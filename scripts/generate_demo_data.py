@@ -5,8 +5,8 @@ shapes. Nothing here comes from a real account.
 
 Usage: python3 scripts/generate_demo_data.py [outdir]     (default: demo/)
 """
-import json, math, os, random, sys
-from datetime import date, datetime, timedelta, timezone
+import math, os, random, sys
+from datetime import datetime, timedelta, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)

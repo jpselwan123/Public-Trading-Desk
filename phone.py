@@ -95,8 +95,7 @@ def keys(template=None, path=None, ask=input, ask_secret=_hidden, log=print):
     """Write .env from .env.example, asking for each key in turn — for a phone with no
     Mac to copy .env from. .env.example's own comments say where each key comes from,
     so they are shown as the questions come. Return keeps what .env already has (or the
-    example's value); a key already saved is never shown. The order settings are not asked: they keep
-    the example's values, dry run on and nothing tradeable, until changed by hand."""
+    example's value); a key already saved is never shown."""
     template = template or os.path.join(HERE, ".env.example")
     path = path or os.path.join(HERE, ".env")
     have, extra = {}, []

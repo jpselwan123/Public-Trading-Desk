@@ -7,14 +7,42 @@ function renderHeader(){
   $('env').hidden = !DATA.connected && !DATA.demo;             // no account yet: neither live nor practice
   $('synced').textContent = DATA.synced_at ? 'account ' + fmtStamp(DATA.synced_at) : 'account not synced yet';
   const sync = B.key === 'csv' ? 'Read your export again'
-    : 'Sync your ' + brokerName() + ' account';
+    : brokerName() === 'your broker' ? 'Sync your account' : 'Sync your ' + brokerName() + ' account';
   $('refreshBtn').setAttribute('aria-label', sync);
   $('refreshBtn').title = sync;
   safe(renderMarketAt);
+  // Nothing connected and nothing wrong: a desk that works as it is. Companies and Research need no
+  // broker, so the card says that first, what connecting would and would not do, and leaves the steps
+  // folded. Once keys are in .env, or something failed, it is about connecting and shows the steps.
+  const optional = !DATA.connected && !B.problem && !B.keys_set;
   $('setup').hidden = (!!DATA.connected && !B.problem) || !!DATA.as_of;
-  $('setupTitle').textContent = B.key === 'csv' ? 'Import your account (read-only)' : 'Connect ' + brokerName() + ' (read-only)';
-  $('setupSteps').innerHTML = (B.connect || []).map(t => '<li>' + stepText(t) + '</li>').join('');
-  $('setupOther').innerHTML = B.problem ? '<b>' + esc(sentence(B.problem)) + '</b>'
+  $('setupTitle').textContent = optional ? 'No broker connected: that is fine'
+    : B.key === 'csv' ? 'Import your account (read-only)' : 'Connect ' + brokerName() + ' (read-only)';
+  $('setupLead').innerHTML = !optional ? '' :
+    '<p>The desk works without one. Follow any US company on <a href="#companies">Companies</a> for its filings, news and ' +
+      'the desk&rsquo;s rating, and use the screener and the rating&rsquo;s record on <a href="#research">Research</a>. ' +
+      'Connect a broker only if you want your own portfolio here.</p>' +
+    '<ul class="trust">' +
+      '<li><b>It only reads.</b> Nothing in the desk can place, change or cancel an order.</li>' +
+      '<li><b>It stays on this computer.</b> The page loads nothing from the internet, and your keys and records are ' +
+        'files here that git ignores.</li>' +
+      '<li><b>Nothing to sign up for.</b> No account and no service run by anyone else. Every site the desk talks to ' +
+        'is listed in <code>docs/NETWORK.md</code>.</li>' +
+    '</ul>' +
+    '<p>Not ready to share a key? A CSV export needs none. To look around first, run <code>./desk.sh --demo</code> ' +
+      'for a made-up account.</p>';
+  $('setupHowTitle').textContent = optional ? 'Connect a broker (optional)' : 'How to connect';
+  if ($('setupHow').dataset.optional !== String(optional)){      // fold or unfold when the state changes, not on every redraw
+    $('setupHow').dataset.optional = String(optional);
+    $('setupHow').open = !optional;
+  }
+  // nothing chosen: each way to connect, one line each; a broker chosen: its steps
+  $('setupSteps').innerHTML = optional
+    ? '<ul class="trust">' + (B.choices || []).map(t => '<li><b>' + esc(t.split(': ')[0]) + '</b>: ' + esc(t.split(': ').slice(1).join(': ')) + '</li>').join('') + '</ul>' +
+      '<p>Then set <code>BROKER</code> in <code>.env</code> to <code>trading212</code>, <code>alpaca</code>, <code>ibkr</code> or <code>csv</code>, ' +
+      'add its keys, and press the round sync button. Each broker&rsquo;s steps are in <code>docs/BROKERS.md</code>.</p>'
+    : '<ol>' + (B.connect || []).map(t => '<li>' + stepText(t) + '</li>').join('') + '</ol>';
+  $('setupOther').innerHTML = optional ? '' : B.problem ? '<b>' + esc(sentence(B.problem)) + '</b>'
     : 'With another broker, set <code>BROKER</code> in <code>.env</code>: Trading 212, Alpaca, Interactive Brokers, ' +
       'or a CSV export from any broker (docs/BROKERS.md).';
   $('valueCard').hidden = !DATA.connected;

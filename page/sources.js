@@ -5,13 +5,14 @@ function renderHealth(){
   const H = DATA.health || [];
   $('healthCard').hidden = !H.length || !!DATA.as_of;
   if (!H.length) return;
-  const failed = H.reduce((n, p) => n + p.failed, 0);
-  $('healthRow').innerHTML = foldOpen('Data sources', failed
-      ? failed + ' failed at the last update'
-      : 'all working at the last update') +
+  const failed = H.reduce((n, p) => n + p.failed, 0), waiting = H.reduce((n, p) => n + (p.waiting || 0), 0);
+  const gist = [failed ? failed + ' failed at the last update' : '', waiting ? waiting + ' waiting for a key' : '']
+    .filter(Boolean).join(' · ') || 'all working at the last update';
+  $('healthRow').innerHTML = foldOpen('Data sources', gist) +
     H.map(p => '<div class="br-block"><div class="br-h">' + esc(p.label) + ' · ' + fmtStamp(p.at, '') + '</div>' +
       p.steps.map(st => '<div class="br-row"><span>' + esc(st.name) + '</span><span>' +
         (st.ok ? 'working' + (st.seconds != null ? ' · ' + st.seconds + ' s' : '')
+               : st.setup ? '<b>waiting for a key</b>: ' + esc(st.why || '')
                : '<b>failed</b>: ' + esc(st.why || '') + ' · last worked ' + (st.last_ok ? fmtStamp(st.last_ok, '') : 'never')) +
         '</span></div>').join('') + '</div>').join('') +
     about('<p>Each source the desk reads, as it went the last time it was asked. For a full check of the keys, ' +

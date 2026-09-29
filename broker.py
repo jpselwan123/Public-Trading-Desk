@@ -24,7 +24,7 @@ figures beside themselves as if they were the broker's.
 Usage: python3 broker.py            sync the account from the broker .env names
        python3 broker.py --check    ask the broker once, and say what answered
 """
-import json, os, sys
+import json, os, re, sys
 from datetime import datetime, timezone
 
 from env_config import atomic_write_json, load_env
@@ -34,6 +34,7 @@ DATA_FILE = os.path.join(HERE, "t212_data.json")     # the account record, which
 DEFAULT = "trading212"
 BROKERS = {
     "trading212": {"name": "Trading 212", "module": None,
+                   "choice": "Trading 212: an API key made with Orders left unticked, so it cannot trade.",
                    "keys": ("T212_API_KEY", "T212_API_SECRET"),
                    "connect": ("In the Trading 212 app: Settings → API (Beta) → Generate API key.",
                                "Tick Account data, Portfolio and every History option. Leave Orders unticked, "
@@ -41,6 +42,7 @@ BROKERS = {
                                "Add `T212_API_KEY` and `T212_API_SECRET` to `.env`.",
                                "Press the round sync button above.")},
     "alpaca": {"name": "Alpaca", "module": "broker_alpaca",
+               "choice": "Alpaca: an API key pair, live or paper. Try paper first: its keys can trade.",
                "keys": ("ALPACA_API_KEY", "ALPACA_API_SECRET"),
                "connect": ("In Alpaca's dashboard, generate an API key pair (switch to Paper first for a "
                            "paper account).",
@@ -49,6 +51,7 @@ BROKERS = {
                            "Alpaca's keys can place orders, so keep `.env` private: the desk only reads with it.",
                            "Press the round sync button above.")},
     "ibkr": {"name": "Interactive Brokers", "module": "broker_ibkr",
+             "choice": "Interactive Brokers: a Flex Web Service token and query, which give reports and no trading access.",
              "keys": ("IBKR_FLEX_TOKEN", "IBKR_FLEX_QUERY"),
              "connect": ("In IBKR's Client Portal, Performance & Reports → Flex Queries: create an Activity "
                          "Flex Query with Account Information, Open Positions, Trades, Cash Transactions, Cash "
@@ -59,6 +62,7 @@ BROKERS = {
                          "to `.env`.",
                          "Press the round sync button above.")},
     "csv": {"name": "your broker", "module": "broker_csv",
+            "choice": "Any other broker: your history exported as a CSV file, with no key at all.",
             "keys": ("BROKER_CSV",),
             "connect": ("Download your account's whole history from your broker as a CSV, every year of it.",
                         "Arrange its columns as docs/BROKERS.md shows, or rename its headers to the names "
@@ -113,26 +117,57 @@ def configured():
         return DEFAULT, str(e)
 
 
-def for_page(raw, key=None, problem=None):
+def for_page(raw, key=None, problem=None, environ=None):
     """What the page says about the broker: the one the account came from, or before any sync
-    the one .env names; its name, whether orders go to it, how to connect it."""
-    if (raw or {}).get("summary"):
+    the one .env names; its name, how to connect it, and whether its keys are in .env yet (that
+    they are, never what they are). A desk with no broker connected is a working desk: the page
+    says so, and only asks for the keys once someone has begun to add them."""
+    environ = os.environ if environ is None else environ
+    account = bool((raw or {}).get("summary"))
+    if account:
         key = of(raw)
     key = key if key in BROKERS else DEFAULT
-    return {"key": key, "name": name_of(raw) if (raw or {}).get("summary") else BROKERS[key]["name"],
+    keys_set = all(str(environ.get(k) or "").strip() for k in BROKERS[key]["keys"])
+    # Trading 212 is only the default: until an account, keys, a BROKER in .env or a problem say a broker
+    # was chosen, the page speaks of "your broker" and offers each way to connect one, never one by name.
+    named = (account or keys_set or bool(problem) or key != DEFAULT
+             or bool(str(environ.get("BROKER") or "").strip()))
+    return {"key": key, "name": (name_of(raw) if account else BROKERS[key]["name"]) if named else "your broker",
             "states_gains": key == DEFAULT,
             "connect": list(BROKERS[key]["connect"]), "derived": bool((raw or {}).get("derived")),
+            "choices": [spec["choice"] for spec in BROKERS.values()], "keys_set": keys_set,
             "valued_at_cost": list((raw or {}).get("valued_at_cost") or []), "problem": problem}
+
+
+SYMBOL = re.compile(r"^[A-Z0-9][A-Z0-9-]{0,14}$")
+MARKET = re.compile(r"^[A-Z0-9]{1,12}$")
+CURRENCY = re.compile(r"^[A-Z]{3}$")
+
+
+def currency_code(value, what="the currency"):
+    """An ISO-style currency code (USD, EUR, GBX), upper case, or BrokerError. What a file or an
+    answer calls a currency ends up on the page, so anything but three letters is refused here."""
+    code = str(value or "").strip().upper()
+    if not CURRENCY.match(code):
+        raise BrokerError(f"{what}: {str(value)[:20]!r} is not a currency code (three letters, such as USD)")
+    return code
 
 
 def line_code(symbol, market="US"):
     """The desk's code for a line, as Trading 212 writes it: a US listing SYMBOL_US_EQ, any other
     SYMBOL_MARKET_EQ. A class letter joins with a hyphen, as the SEC and Tiingo write it (BRK.B →
-    BRK-B), so the short ticker is the SEC's. Only a US line is rated, priced or placed as a filer."""
+    BRK-B), so the short ticker is the SEC's. Only a US line is rated, priced or placed as a filer.
+    A symbol or market with anything but letters, digits and the joins above is refused: it is
+    not a line the desk could price, and it would end up on the page."""
+    raw = symbol
     symbol = str(symbol or "").strip().upper().replace(".", "-").replace("/", "-").replace(" ", "-")
     market = str(market or "US").strip().upper()
     if not symbol:
         raise BrokerError("a trade or holding with no symbol")
+    if not SYMBOL.match(symbol):
+        raise BrokerError(f"{str(raw)[:20]!r} is not a symbol the desk can read (letters, digits, dots and dashes)")
+    if not MARKET.match(market.replace("_", "")):
+        raise BrokerError(f"{market[:20]!r} is not a market the desk can read (letters and digits)")
     return symbol + (US_SUFFIX if market in US_MARKETS else "_" + market.replace("_", "") + "_EQ")
 
 
@@ -150,7 +185,7 @@ class Record:
             raise BrokerError(f"no adapter writes records for {broker}")
         if not currency:
             raise BrokerError(f"{BROKERS[broker]['name']} did not say the account's currency")
-        self.currency = str(currency).upper()
+        self.currency = currency_code(currency, "the account's currency")
         self.out = {"broker": broker, "env": env, "summary": {"currency": self.currency},
                     "positions": [], "orders": [], "dividends": [], "transactions": []}
         if broker_name:
@@ -164,7 +199,8 @@ class Record:
             raise BrokerError(f"a trade's side must be buy or sell, not {side}")
         if not qty:
             return
-        instrument = {"ticker": code, "name": name or code.split("_")[0], "currency": price_currency or ""}
+        price_currency = currency_code(price_currency, f"{code}'s price currency") if price_currency else ""
+        instrument = {"ticker": code, "name": name or code.split("_")[0], "currency": price_currency}
         self.out["orders"].append({
             "order": {"id": str(ref), "ticker": code, "side": side, "status": "FILLED", "createdAt": when,
                       "instrument": instrument},
@@ -194,7 +230,8 @@ class Record:
         """A holding as the broker states it: `value` and `cost` in the account's currency."""
         if not quantity:
             return
-        row = {"instrument": {"ticker": code, "name": name or code.split("_")[0], "currency": price_currency or ""},
+        price_currency = currency_code(price_currency, f"{code}'s price currency") if price_currency else ""
+        row = {"instrument": {"ticker": code, "name": name or code.split("_")[0], "currency": price_currency},
                "quantity": float(quantity), "currentPrice": float(price or 0.0),
                "averagePricePaid": float(average or 0.0),
                "walletImpact": {"currency": self.currency, "currentValue": float(value),

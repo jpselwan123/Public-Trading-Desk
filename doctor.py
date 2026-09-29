@@ -1,7 +1,7 @@
 """Is the desk working? One report on everything it depends on, safe to paste into a chat.
 
     python3 doctor.py             the code, the keys, each data source, the stores, the ratings
-    python3 doctor.py --account   Trading 212 as well
+    python3 doctor.py --account   your broker as well
     python3 doctor.py --offline   no network at all: the code, keys, stores and ratings
 
 Nothing private is printed. A key is said to be set or missing, never shown, and any key
@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from env_config import load_env, moment, scrub, SECRET_NAMES  # noqa: E402
+from env_config import load_env, moment, scrub  # noqa: E402
 import health  # noqa: E402
 
 WAIT = 10                       # seconds a source has to answer
@@ -226,7 +226,7 @@ def last_updates(folder, now):
         rows.append((part["label"], f"{str(part['at'])[:16].replace('T', ' ')} UTC ({ago(part['at'], now)}), "
                                     f"{len(part['steps']) - len(failed)} of {len(part['steps'])} steps ok"))
         for s in failed:
-            rows.append(("", f"FAILED {s['name']}: {s.get('why')}; last worked "
+            rows.append(("", f"{'WAITING FOR A KEY' if s.get('setup') else 'FAILED'} {s['name']}: {s.get('why')}; last worked "
                              + (ago(s['last_ok'], now) if s.get("last_ok") else "never")))
     return rows or [("", "no update recorded yet (the page records one each time it updates)")]
 

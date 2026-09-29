@@ -770,6 +770,43 @@ class FailureWordsTests(unittest.TestCase):
             self.assertIn("NO_SEC_CONTACT", source, module)
             self.assertNotIn("requests to identify themselves\")", source, module)
 
+    def test_a_key_not_added_yet_is_a_step_to_take_and_not_a_failure(self):
+        """A desk that has not been given its free keys yet is waiting for them, not broken: the update
+        says which to add, apart from what really failed, and the page shows the two differently."""
+        handler = server.Handler.__new__(server.Handler)
+        handler.folder, handler.demo = tempfile.mkdtemp(), False
+        handler.build, handler.record_health = lambda: None, lambda *a: None
+        problems = [("Filings", env_config.NO_SEC_CONTACT), ("Prices", env_config.NO_TIINGO_KEY),
+                    ("Earnings", env_config.NO_FINNHUB_KEY), ("News", env_config.NO_FINNHUB_KEY),
+                    ("Company universe", "The SEC is busy: try again later")]
+        handler.update_research = lambda report, timed: problems
+        code, out = handler.refresh_market()
+        self.assertEqual(out["message"], "Company universe: The SEC is busy: try again later")
+        self.assertEqual(out["setup"], [env_config.NO_SEC_CONTACT, env_config.NO_TIINGO_KEY, env_config.NO_FINNHUB_KEY])
+        handler.update_research = lambda report, timed: problems[:4]
+        code, out = handler.refresh_market()
+        self.assertIsNone(out["message"])                                   # nothing failed: nothing red
+        self.assertEqual(len(out["setup"]), 3)
+        handler.update_research = lambda report, timed: []
+        self.assertEqual(handler.refresh_market()[1]["setup"], [])
+        for module, constant in (("prices.py", "NO_TIINGO_KEY"), ("earnings.py", "NO_FINNHUB_KEY"), ("news.py", "NO_SEC_CONTACT")):
+            with open(os.path.join(ROOT, module)) as f:                      # one sentence, said where it is raised
+                self.assertIn(constant, f.read(), module)
+        self.assertEqual(set(env_config.SETUP_STEPS),
+                         {env_config.NO_SEC_CONTACT, env_config.NO_TIINGO_KEY, env_config.NO_FINNHUB_KEY})
+        app = page_source()
+        self.assertIn("res.setup", app)
+        self.assertIn("Company data is waiting for a few free keys", app)
+        # and the Data sources row says the same: waiting for a key, not failed
+        now = datetime(2026, 9, 26, 12, 0, tzinfo=timezone.utc)
+        stored = health.record({}, "market", [("Filings", 1.0), ("Prices", 1.0), ("Earnings", 1.0), ("News", 1.0)],
+                               [("Filings", env_config.NO_SEC_CONTACT), ("Prices", env_config.NO_TIINGO_KEY),
+                                ("News", "The SEC is busy")], now=now)
+        (part,) = health.for_page(stored)
+        self.assertEqual((part["failed"], part["waiting"]), (1, 2))
+        self.assertEqual([s["name"] for s in part["steps"] if s.get("setup")], ["Filings", "Prices"])
+        self.assertIn("waiting for a key", app)
+
 
 class HealthCheckTests(unittest.TestCase):
     """What each data source did at the last update (health.py, the Overview's "Data

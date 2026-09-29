@@ -127,7 +127,7 @@
   body.as-of .card:has(#pSubmit){display:none !important;}
   body.as-of #pReset{display:none !important;}          /* a past day is read-only: it never resets today's book */
   @media (max-width:640px){ .asof-pick span{display:none;} }
-  .msg{font-size:14px;color:var(--critical);margin-top:8px;}
+  .msg{font-size:14px;color:var(--critical);margin-top:8px;margin-bottom:18px;}
   .msg.progress{color:var(--ink-muted);}
   .msg:empty{display:none;}
 
@@ -620,4 +620,8 @@
   /* ---------- setup ---------- */
   .setup ol{margin:8px 0 0;padding-left:20px;line-height:1.95;color:var(--ink-muted);}
   .setup b{color:var(--ink);}
+  .setup p{margin:8px 0 0;line-height:1.7;color:var(--ink-muted);font-size:14.5px;}
+  .setup ul.trust{margin:10px 0 0;padding-left:20px;line-height:1.8;color:var(--ink-muted);font-size:14.5px;}
+  .setup .page-fold{margin-top:14px;}
+  .setup a{color:var(--accent);}
   .setup code{font-family:var(--font-num);font-size:14px;background:var(--surface-2);padding:1px 6px;border-radius:5px;color:var(--ink);}

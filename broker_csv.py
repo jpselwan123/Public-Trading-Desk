@@ -80,7 +80,7 @@ def settings(environ=None):
     dates = str(environ.get("BROKER_CSV_DATES") or "").strip().lower() or None
     if dates not in (None, "dmy", "mdy"):
         raise broker.BrokerError("BROKER_CSV_DATES must be dmy or mdy")
-    return {"path": path, "currency": str(environ.get("BROKER_CURRENCY") or "USD").strip().upper(),
+    return {"path": path, "currency": broker.currency_code(environ.get("BROKER_CURRENCY") or "USD", "BROKER_CURRENCY"),
             "name": str(environ.get("BROKER_NAME") or "").strip() or None, "dates": dates}
 
 
@@ -186,6 +186,14 @@ def read(path, order):
     return out
 
 
+def _at(line, make, *args):
+    """A value read from the row on `line`, or the reason it cannot be, naming the line."""
+    try:
+        return make(*args)
+    except broker.BrokerError as e:
+        raise broker.BrokerError(f"line {line}: {e}") from None
+
+
 def _key(row):
     return "|".join(row[c] for c in ("date", "type", "symbol", "quantity", "price", "amount", "id"))
 
@@ -221,7 +229,7 @@ def sync(existing=None, environ=None):
                 raise broker.BrokerError(f"line {line}: a {kind.lower()} with no symbol")
             qty = number(row["quantity"], line, "quantity", required=True)
             price = number(row["price"], line, "price")
-            currency = (row["currency"] or account).upper()
+            currency = _at(line, broker.currency_code, row["currency"] or account, "the price's currency")
             fee = abs(number(row["fee"], line, "fee") or 0.0)
             if amount is None:
                 if currency != account or price is None:
@@ -230,7 +238,7 @@ def sync(existing=None, environ=None):
                 amount = abs(qty) * price + (fee if kind == "BUY" else -fee)
             if price is None:
                 price = abs(amount) / abs(qty) if qty else 0.0
-            code = broker.line_code(row["symbol"], row["market"] or "US")
+            code = _at(line, broker.line_code, row["symbol"], row["market"] or "US")
             record.trade(ref, when, code, kind, qty, price, abs(amount), price_currency=currency,
                          fees=[("COMMISSION", fee)] if fee else ())
         elif kind == "DIVIDEND":
@@ -240,7 +248,7 @@ def sync(existing=None, environ=None):
                 raise broker.BrokerError(f"line {line}: a dividend with no symbol")
             withheld = abs(number(row["withheld"], line, "withheld") or 0.0)
             qty = number(row["quantity"], line, "quantity")
-            code = broker.line_code(row["symbol"], row["market"] or "US")
+            code = _at(line, broker.line_code, row["symbol"], row["market"] or "US")
             record.dividend(ref, when, code, abs(amount), gross=abs(amount) + withheld)
         elif kind == "TAX":
             taxes.append((ref, when, row, amount))
@@ -254,7 +262,7 @@ def sync(existing=None, environ=None):
     for ref, when, row, amount in taxes:
         if amount is None:
             raise broker.BrokerError(f"line {row['line']}: a tax with no amount")
-        code = broker.line_code(row["symbol"], row["market"] or "US") if row["symbol"] else None
+        code = _at(row["line"], broker.line_code, row["symbol"], row["market"] or "US") if row["symbol"] else None
         paid = next((d for d in record.out["dividends"] if code and d["ticker"] == code
                      and d["paidOn"][:10] == when[:10]), None)
         if paid:

@@ -42,10 +42,14 @@ __PAGE_CSS__
       <h2>Overview</h2>
     </div>
 
-    <!-- how to connect the broker .env names: its steps are broker.py's (BROKERS[...]["connect"]) -->
+    <!-- no broker yet: the desk works without one, and says how to connect one if you want to (the
+         steps are broker.py's, BROKERS[...]["connect"]) -->
     <div class="card setup" id="setup" hidden>
       <div class="card-head"><h3 id="setupTitle">Connect your account (read-only)</h3></div>
-      <ol id="setupSteps"></ol>
+      <div id="setupLead"></div>
+      <details class="page-fold" id="setupHow"><summary id="setupHowTitle">How to connect</summary>
+        <div id="setupSteps"></div>
+      </details>
       <div class="co-note" id="setupOther"></div>
     </div>
 

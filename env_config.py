@@ -15,6 +15,12 @@ PARTLY = "_partly"
 # what every step that asks the SEC says when .env names no contact: one fix, one sentence
 NO_SEC_CONTACT = ("Add SEC_CONTACT=your@email to .env — the SEC asks automated requests to "
                   "declare a contact address")
+NO_TIINGO_KEY = "Add TIINGO_API_KEY=… to .env (free key from tiingo.com)"
+NO_FINNHUB_KEY = "Add FINNHUB_API_KEY=… to .env (free key from finnhub.io)"
+# What a step says when it only lacks a key. That is a step for the user to take, not a failure: the
+# update reports these apart from what really failed (server.refresh_market), so a desk that has
+# not been given its free keys yet reads as waiting for them, not as broken.
+SETUP_STEPS = (NO_SEC_CONTACT, NO_TIINGO_KEY, NO_FINNHUB_KEY)
 
 
 def unpacked(body, response):
@@ -32,11 +38,11 @@ def load_env(path=None):
     """Load .env into the environment. The file is authoritative.
 
     This used to call os.environ.setdefault, which meant an exported shell variable
-    beat the file. One `export EXECUTE_DRY_RUN=0` — typed once while testing, left in
-    a .zshrc, or inherited by a future cron entry — turned the dry run off for every
-    run from that shell, with the file that governs it still saying 1. desk.sh
-    inherits the interactive shell, so this was silent. Those variables gate
-    execution, so the file wins unless DESK_ENV_OVERRIDE=1 says otherwise.
+    beat the file. One `export TIINGO_API_KEY=...` — typed once while testing, left in
+    a .zshrc, or inherited by a future cron entry — replaced the key for every run
+    from that shell, with the file that governs it still saying otherwise. desk.sh
+    inherits the interactive shell, so this was silent. The file wins unless
+    DESK_ENV_OVERRIDE=1 says otherwise.
 
     Returns the set of keys the file set, so a caller can say where a value came from.
     """
@@ -62,9 +68,15 @@ def load_env(path=None):
 def atomic_write(path, text):
     """Write text to path without ever leaving a truncated/corrupt file behind if
     the process is killed mid-write (a force-quit, or a subprocess timeout) — write
-    to a temp file first, then rename, which is atomic on the filesystem."""
+    to a temp file first, then rename, which is atomic on the filesystem.
+
+    Every file the desk writes holds something of the user's (their holdings, what they
+    follow, their notes), so each is readable by its owner alone, whatever the umask: on a
+    computer more than one person uses, no one else can read the page or the stores."""
     tmp = path + '.tmp'
-    with open(tmp, 'w') as f:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        os.chmod(tmp, 0o600)                 # a temp file left by an earlier run keeps its old mode otherwise
         f.write(text)
     os.replace(tmp, path)
 
@@ -74,20 +86,21 @@ def atomic_write_json(path, data, indent=None):
 
 
 # every value in .env that must never be printed, logged, stored or sent to the page
-SECRET_NAMES = ("T212_API_KEY", "T212_API_SECRET", "TIINGO_API_KEY", "FINNHUB_API_KEY", "OPENAI_API_KEY",
-                "SEC_CONTACT")
+SECRET_NAMES = ("T212_API_KEY", "T212_API_SECRET", "ALPACA_API_KEY", "ALPACA_API_SECRET", "IBKR_FLEX_TOKEN",
+                "TIINGO_API_KEY", "FINNHUB_API_KEY", "OPENAI_API_KEY", "SEC_CONTACT")
 
 
 def scrub(text, environ=None):
     """Blank every key value that appears in the text, however it got there (Finnhub's key
-    travels in its addresses, and an error can quote one)."""
+    travels in its addresses, Interactive Brokers' token too, and an error can quote one)."""
     environ = os.environ if environ is None else environ
     text = str(text)
     for name in SECRET_NAMES:
         value = (environ.get(name) or "").strip()
         if len(value) >= 6:
             text = text.replace(value, "[" + name.lower() + "]")
-    return re.sub(r"(token=)[A-Za-z0-9_-]{6,}", r"\1[key]", text)
+    text = re.sub(r"(token=)[A-Za-z0-9_-]{6,}", r"\1[key]", text)
+    return re.sub(r"([?&]t=)[A-Za-z0-9_-]{6,}", r"\1[key]", text)         # Flex Web Service's address
 
 
 class UnreadableStore(Exception):

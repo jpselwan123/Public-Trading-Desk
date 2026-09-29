@@ -28,10 +28,10 @@ event (see build_desk.build_reactions).
 Usage: python3 prices.py            update the watchlist's prices
        python3 prices.py AAPL       update one ticker
 """
-import collections, json, os, re, sys, time, urllib.error, urllib.request
+import collections, json, os, sys, time, urllib.error, urllib.request
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from zoneinfo import ZoneInfo
-from env_config import load_env, atomic_write_json, fetched_today, moment, unpacked, PARTLY
+from env_config import load_env, atomic_write_json, fetched_today, moment, unpacked, NO_TIINGO_KEY, PARTLY
 from news import FOLLOW_USAGE, load_watchlist
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -120,7 +120,7 @@ def api_key():
     load_env(os.path.join(HERE, ".env"))
     key = os.environ.get("TIINGO_API_KEY", "").strip()
     if not key:
-        raise PriceError("Add TIINGO_API_KEY=… to .env (free key from tiingo.com)")
+        raise PriceError(NO_TIINGO_KEY)
     return key
 
 

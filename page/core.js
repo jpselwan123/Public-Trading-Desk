@@ -18,13 +18,13 @@ function money(v, opts){
   const abs = Math.abs(v || 0);
   let s;
   try { s = new Intl.NumberFormat(undefined, {style:'currency', currency:cur, minimumFractionDigits:opts.dp==null?2:opts.dp, maximumFractionDigits:opts.dp==null?2:opts.dp}).format(abs); }
-  catch(e){ s = abs.toFixed(2) + ' ' + cur; }
+  catch(e){ s = abs.toFixed(2) + ' ' + esc(cur); }         // a code Intl does not know: still only text
   if (opts.sign) return (v > 0.004 ? '+' : v < -0.004 ? '−' : '') + s;
   return (v < -0.004 ? '−' : '') + s;
 }
 function priceIn(v, cur){
   try { return new Intl.NumberFormat(undefined, {style:'currency', currency:cur || 'USD', maximumFractionDigits: v < 1 ? 4 : 2}).format(v || 0); }
-  catch(e){ return (v || 0).toFixed(2) + ' ' + (cur || ''); }
+  catch(e){ return (v || 0).toFixed(2) + ' ' + esc(cur || ''); }
 }
 /* A share's price in its own currency; a London line's pence (GBX) as pence, which Intl does not know. */
 function pricePer(v, cur){
