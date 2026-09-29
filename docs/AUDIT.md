@@ -117,8 +117,10 @@ and the personal context taken out.
 - Static analysis of both codebases (undefined names, syntax, unused code; the page's scripts as
   one program). Every page element the scripts look up exists.
 - The two codebases compared by structure, ignoring comments and docstrings: only 8 Python files
-  differ in code, all of it the order path, wording, or the items below. The test suites compared
-  by name and body: the 93 tests only the private desk has are all about orders.
+  differ in code, and every difference is the order path, a name, or this desk's first-run card.
+  The test suites compared by name and body: the tests only the private desk has are about
+  orders, or are its twins of tests this desk has under another name. The fixes below were made
+  in both.
 - A live server sent hostile requests: another site's Host and Origin, DNS-rebinding names,
   path traversal, oversized and malformed bodies, bad dates. Every one was refused.
 - A full simulated update run under seven failure modes with recognisable fake keys set, then

@@ -99,7 +99,7 @@ async function updateMarket(pressed){
     const setup = res.setup || [];
     $('marketMsg').classList.toggle('progress', !res.message);
     say((res.message ? 'Companies updated, except ' + res.message + (setup.length ? '. Also to do: ' : '') : '') +
-        (!res.message && setup.length ? 'Company data is waiting for a few free keys (README: Use it without a broker). ' : '') +
+        (!res.message && setup.length ? 'Company data is waiting for a few free keys. ' : '') +
         setup.join('; '));
     marketRunning = false;
     await showMarket();
