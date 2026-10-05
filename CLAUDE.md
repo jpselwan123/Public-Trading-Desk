@@ -314,6 +314,15 @@ Six tabs with hash routing (`TABS` in the template), each one subject:
   with its reason, under a year of weeks. **Portfolio's lean** (`rating.tilt`): the rating's four theme places averaged by value held.
   Both describe; neither is coloured as good or bad or worded as advice. `doctor.py` says whether the weekly line and the risk figures
   can be drawn, by count and category, never by amount.
+- **Refreshing faster:** the account's five independent reads (summary, positions, the first page of each history) are
+  asked together (`t212.sync`); a company's news is asked again no sooner than `headlines.ASK_AGAIN_MINUTES` after it
+  was last asked (`headlines.json`'s `asked`), unless the button was pressed (`POST /refresh {pressed: true}`); the news
+  starts beside the filings for companies the filings have already named, and after them for the rest (a story counts
+  only when it names the company); the prices, then the filings, rebuild the page as they come in (`ON_THE_PAGE`,
+  `Handler.show_partway`); how long a run took by the clock is kept in `health.json` and shown on the Data sources row,
+  in `doctor.py` and on the pressed button; `update.sh` does not ask GitHub twice within `UPDATE_RECENT` seconds.
+  `tests/support.py` fails any test that reaches a host outside this machine; the demo's content varies with the date,
+  so its tests state what must hold, not counts.
 - **Quick jump** (`page/palette.js`, Ctrl/⌘+K or "/"): tabs, sections, companies and the two refresh buttons. It moves
   about the page and sends nothing (`QuickJumpTests`).
 - **Companies:** a follow box and one sortable table of every company covered (price, the last

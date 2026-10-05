@@ -68,6 +68,142 @@ class WholeUpdateTests(unittest.TestCase):
         self.assertTrue(data["company_news"]["companies"])
         build_desk.render(data)
 
+    def test_news_is_asked_again_only_after_the_window_or_when_the_button_is_pressed(self):
+        """Run whole over the simulated network: the second update, a moment after the first, asks neither
+        Finnhub nor Google News for any company's stories; the button's does, for every one it covers."""
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.handler.refresh_account()
+        first, log = self.update()
+        self.assertEqual((first["ok"], first["message"]), (True, None), log)
+        news_requests = lambda: ([u for s, u in world.LOG if s == "finnhub" and "company-news" in u],
+                                 [u for s, u in world.LOG if s == "google"])
+        finnhub, google = news_requests()
+        self.assertTrue(finnhub and google)                                     # the first update asks for the news
+        del world.LOG[:]
+        second, log = self.update()
+        self.assertEqual((second["ok"], second["message"]), (True, None), log)
+        self.assertEqual(news_requests(), ([], []))                             # within the window: not again
+        del world.LOG[:]
+        self.handler.pressed = True
+        try:
+            third, log = self.update()
+        finally:
+            self.handler.pressed = False
+        self.assertEqual((third["ok"], third["message"]), (True, None), log)
+        again_finnhub, again_google = news_requests()
+        symbol = lambda url: re.search(r"symbol=([A-Z.]+)", url).group(1)
+        held = {symbol(u) for u in again_finnhub}
+        self.assertTrue(len(held) >= 5 and held <= {symbol(u) for u in finnhub})   # pressed: each company covered, afresh
+        self.assertTrue(again_google)
+        store = json.load(open(os.path.join(self.folder, "headlines.json")))
+        self.assertTrue(set(store["asked"]) == {"finnhub", "press"} and store["asked"]["finnhub"])
+
+    def test_the_page_is_rebuilt_when_the_prices_and_the_filings_are_in_not_when_the_news_is(self):
+        """5 Oct 2026, the owner: "update companies and refresh the desk faster". The news is the slowest chain
+        (Finnhub's pause, then the press's two searches a company); the prices and the filings are not, and used to
+        wait for it. Here the news is held back until the page has been rebuilt and shown: it must be, while the
+        news is still unasked."""
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.handler.refresh_account()
+        seen, waited, real = threading.Event(), [], headlines.update
+
+        def held(*a, **k):
+            waited.append(seen.wait(30))                 # false only if the page was never rebuilt meanwhile
+            return real(*a, **k)
+        headlines.update = held
+        events, shown = [], []
+
+        def report(event):
+            events.append(event)
+            if event.get("built"):
+                shown.append(json.load(open(os.path.join(self.folder, "desk_data.json"))))
+                seen.set()
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as log:
+                code, out = self.handler.refresh_market(report)
+        finally:
+            headlines.update = real
+        self.assertEqual((out["ok"], out["message"]), (True, None), log.getvalue())
+        self.assertTrue(waited and all(waited))                     # rebuilt while the news waited
+        self.assertTrue(shown)
+        self.assertTrue(shown[0]["companies"])                      # a whole page, with the companies on it (the first to come in)
+        news_ended = next(i for i, e in enumerate(events) if e.get("step") == "News" and e.get("state") in ("done", "failed"))
+        self.assertLess(events.index({"built": True}), news_ended)
+        steps = health.load(self.folder)["market"]["steps"]
+        self.assertEqual([n for n, st in steps.items() if not st["ok"]], [])
+        for name in server.ON_THE_PAGE:
+            self.assertIn(name, steps)
+
+    def test_the_news_does_not_wait_for_the_filings_for_a_name_it_has_and_does_for_one_it_has_not(self):
+        """The news used to start once the filings ended, for the name each company's filings give (a story
+        counts when it names the company). A company already named is asked at once beside the filings; one the
+        filings have not named yet is asked after them, in a pass of its own, and loses nothing by it."""
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.handler.refresh_account()
+        first, log = self.update()
+        self.assertEqual((first["ok"], first["message"]), (True, None), log)
+        names = json.load(open(os.path.join(self.folder, "news_data.json")))["companies"]
+        self.assertTrue(len(names) >= 5)
+        asks, filings_done = [], []
+        real_update, real_press, real_filings = headlines.update, headlines.update_press, news.refresh
+
+        def update(covered, *a, **k):
+            asks.append(("finnhub", sorted(k.get("ask") or []), bool(filings_done)))
+            return real_update(covered, *a, **k)
+
+        def update_press(covered, *a, **k):
+            asks.append(("press", sorted(k.get("ask") or []), bool(filings_done)))
+            return real_press(covered, *a, **k)
+
+        def refresh(*a, **k):
+            started = threading.Event()
+            deadline = time.monotonic() + 20
+            while not any(x[0] == "finnhub" for x in asks) and time.monotonic() < deadline:
+                started.wait(0.01)                       # the filings hold back until the first news pass has begun
+            filings_done.append(any(x[0] == "finnhub" for x in asks))
+            return real_filings(*a, **k)
+        headlines.update, headlines.update_press, news.refresh = update, update_press, refresh
+        try:
+            self.handler.pressed = True
+            second, log = self.update()
+            self.assertEqual((second["ok"], second["message"]), (True, None), log)
+            self.assertEqual(filings_done, [True])           # the news began before the filings ended: it did not wait for them
+            self.assertEqual([x[0] for x in asks], ["finnhub", "press"])         # nobody new: no second pass
+            self.assertEqual(asks[0][1], sorted(names))                            # every named company, at once
+            # one company the filings have not named yet: dropped from their names, as a holding bought today is
+            del asks[:], filings_done[:]
+            stranger = sorted(names)[0]
+            kept = dict(names)
+            del kept[stranger]
+            path = os.path.join(self.folder, "news_data.json")
+            store = json.load(open(path))
+            store["companies"] = kept
+            json.dump(store, open(path, "w"))
+            third, log = self.update()
+            self.assertEqual((third["ok"], third["message"]), (True, None), log)
+        finally:
+            headlines.update, headlines.update_press, news.refresh = real_update, real_press, real_filings
+            self.handler.pressed = False
+        passes = [(src, ask) for src, ask, _ in asks]
+        self.assertEqual(passes, [("finnhub", sorted(kept)), ("press", sorted(kept)),
+                                  ("finnhub", [stranger]), ("press", [stranger])])
+        self.assertTrue(all(done for src, ask, done in asks[2:]))                 # the new company's pass came after the filings
+        steps = health.load(self.folder)["market"]["steps"]
+        self.assertIn("News (companies new to the desk)", steps)
+        stories = json.load(open(os.path.join(self.folder, "headlines.json")))
+        self.assertIn(stranger, stories["companies"])
+
+    def test_a_step_that_shows_the_page_does_so_only_while_something_else_is_still_going(self):
+        h, events, built = self.handler, [], []
+        h.build = lambda: built.append(1)
+        h.unfinished = {"Prices on the page", "Filings on the page", "News", "Ratings", "Research"}
+        h.show_partway(events.append)
+        self.assertEqual((built, events), ([1], [{"built": True}]))        # the news is still to come
+        h.unfinished = {"Prices on the page", "Filings on the page", "Ratings", "Research"}
+        h.show_partway(events.append)
+        self.assertEqual(built, [1])                                       # only the desk's own last steps: the update's rebuild is next
+        h.unfinished = frozenset()
+
     def test_every_source_failing_is_reported_never_the_desk_itself(self):
         """Every source at once answering with garbage, with another page (a network's), with
         nothing, or refusing the key: each step fails with its reason, the page still builds,

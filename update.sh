@@ -11,8 +11,11 @@
 #   - when an update changes the Mac app itself, the app is rebuilt in the background,
 #     so the next opening runs the new one.
 # Every attempt is one line in server.log.
+#   - a desk opened again within UPDATE_RECENT seconds of the last time GitHub answered does not ask again:
+#     reopening the desk right after closing it waited for the network twice; UPDATE_RECENT=0 asks every time.
 cd "$(dirname "$0")" || exit 0
 UPDATE_WAIT=${UPDATE_WAIT:-20}
+UPDATE_RECENT=${UPDATE_RECENT:-180}
 stamp() { echo "$(date '+%Y-%m-%d %H:%M:%S') update: $*"; }
 
 grep -qE '^[[:space:]]*AUTO_UPDATE[[:space:]]*=[[:space:]]*1' .env 2>/dev/null || [ "${AUTO_UPDATE:-}" = "1" ] \
@@ -21,6 +24,16 @@ grep -qE '^[[:space:]]*AUTO_UPDATE[[:space:]]*=[[:space:]]*1' .env 2>/dev/null |
 [ -d .git ] || { stamp "not a git checkout; skipped"; exit 0; }
 [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "main" ] || { stamp "not on main; skipped"; exit 0; }
 before=$(git rev-parse HEAD)
+
+# the last time GitHub answered, in seconds; a missing or damaged note is no note
+checked=.update_checked
+now=$(date +%s)
+last=$(cat "$checked" 2>/dev/null)
+case "$last" in ''|*[!0-9]*) last=0 ;; esac
+if [ "$last" -le "$now" ] && [ $((now - last)) -lt "$UPDATE_RECENT" ]; then
+  stamp "asked GitHub $((now - last))s ago; opening on $(git log --oneline -1)"
+  exit 0
+fi
 
 # the download alone is timed out: stopping it never leaves the checkout half-written
 GIT_TERMINAL_PROMPT=0 git fetch --quiet origin main 2>/dev/null &
@@ -33,6 +46,7 @@ if ! wait "$fetching"; then
   exit 0
 fi
 kill "$watchdog" 2>/dev/null
+echo "$now" > "$checked" 2>/dev/null
 
 if ! git merge --ff-only --quiet origin/main 2>/dev/null; then
   stamp "not updated: a local edit is in the way (git status shows it); opening on $(git log --oneline -1)"

@@ -16,6 +16,7 @@ Usage:  python3 t212.py            sync
         python3 t212.py --check    test the key (one request) and exit
 """
 import base64, http.client, json, os, socket, sys, time, urllib.error, urllib.parse, urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from env_config import load_env, atomic_write_json, read, unpacked
 
@@ -181,9 +182,35 @@ def clean_summary(summary):
     return summary
 
 
+def history_since(client, path, stored, key):
+    """What Trading 212 holds of one history that `stored` does not: its pages walked newest first, in turn,
+    until one is wholly known (history never changes once written)."""
+    known = {key(i) for i in stored if key(i) is not None}
+    fresh = []
+    for items in client.pages(path, known, key):
+        fresh.extend(i for i in items if key(i) not in known)
+    return fresh
+
+
 def sync(client, existing=None, log=print):
     existing = existing or {}
-    summary, positions = client.get("/equity/account/summary"), client.get("/equity/positions")
+    # The account's summary, its positions and the first page of each history do not depend on one another, and
+    # each over the VPN is a new connection (5 Oct 2026, the owner: "refresh the desk faster"): they are asked
+    # together, each history's pages still in turn, and answered in this order, so the first thing to fail is the
+    # first of them to fail as it was when they went one after another. The rate limits are per call, in the
+    # headers of each answer, which every call waits out for itself (Client._pace).
+    with ThreadPoolExecutor(max_workers=2 + len(HISTORY)) as pool:
+        asked = [pool.submit(client.get, "/equity/account/summary"), pool.submit(client.get, "/equity/positions")]
+        asked += [pool.submit(history_since, client, path, existing.get(name) or [], key) for name, path, key in HISTORY]
+        answers = []
+        for future in asked:
+            try:
+                answers.append(future.result())
+            except BaseException:
+                for other in asked:
+                    other.cancel()                  # what has not started need not
+                raise
+    summary, positions = answers[0], answers[1]
     # an account always has a currency, and a portfolio is a list, if an empty one: an answer
     # that is neither is not the account, and must not stand in for it (an empty answer
     # through a flaky network would have shown an empty portfolio until the next sync)
@@ -194,12 +221,8 @@ def sync(client, existing=None, log=print):
         "summary": clean_summary(summary),
         "positions": positions,
     }
-    for name, path, key in HISTORY:
+    for (name, path, key), fresh in zip(HISTORY, answers[2:]):
         stored = existing.get(name) or []
-        known = {key(i) for i in stored if key(i) is not None}
-        fresh = []
-        for items in client.pages(path, known, key):
-            fresh.extend(i for i in items if key(i) not in known)
         seen, merged = set(), []
         for item in fresh + stored:             # newest first, deduplicated
             k = key(item)

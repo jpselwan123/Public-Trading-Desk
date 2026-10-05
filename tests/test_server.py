@@ -567,7 +567,8 @@ class ServerTests(unittest.TestCase):
         code, result = h.refresh_market(events.append)
         self.assertEqual(events, ["sources"])
         self.assertEqual((code, result["ok"], result["message"]), (200, True, None))
-        self.assertTrue(result["timing"].startswith("Took 21 s; longest: Prices 21 s"))
+        self.assertTrue(result["timing"].startswith("Took "))                      # by the clock; the step's own seconds follow
+        self.assertIn("longest: Prices 21 s.", result["timing"])
         for method in (server.Handler.refresh_market, server.Handler.update_research, server.Handler.fetch_company):
             source = inspect.getsource(method)
             self.assertIsNone(re.search(r"\b(t212|broker\w*)\.\w", source), method.__name__)
@@ -729,6 +730,40 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(server.timing([("Trading 212", 6.2), ("Prices", 21.4), ("Research", 0.1), ("Filings", 44.9)]),
                          "Took 1 min 13 s; longest: Filings 45 s, Prices 21 s, Trading 212 6 s.")
         self.assertIsNone(server.timing([]))
+
+    def test_the_timer_spares_the_news_sources_and_the_button_does_not(self):
+        source = inspect.getsource(server.Handler.update_research)
+        self.assertIn("again = None if self.pressed else headlines.ASK_AGAIN", source)
+        self.assertEqual(source.count("skip_within=again"), 4)         # Finnhub's stories and the press's, each in its two passes
+        self.assertFalse(server.Handler.pressed)                        # a handler asks for the quiet way unless told
+        self.assertIn('self.pressed = body.get("pressed") is True', inspect.getsource(server.Handler.do_POST))
+        register = read(os.path.join(ROOT, "docs", "EVIDENCE.md"))
+        self.assertIn("headlines.ASK_AGAIN_MINUTES", register)
+        self.assertIn(f"{headlines.ASK_AGAIN_MINUTES} minutes", register)        # the register states what the code uses
+        follow = inspect.getsource(server.Handler.fetch_company)
+        self.assertNotIn("skip_within", follow)                         # a company just followed is asked at once
+
+    def test_the_time_is_the_clocks_when_the_steps_ran_side_by_side(self):
+        """Steps in different lanes overlap, so their seconds added up are not the time the update took: it
+        is the wall clock's, kept with the run (health.json), shown on the page's Data sources row and printed
+        by doctor.py beside the slowest steps."""
+        steps = [("Filings", 40.0), ("Prices", 21.0), ("News", 30.0)]
+        self.assertEqual(health.timing(steps, 45.0), "Took 45 s; longest: Filings 40 s, News 30 s, Prices 21 s.")
+        self.assertTrue(health.timing(steps).startswith("Took 1 min 31 s"))          # without it, the sum: steps in turn
+        now = datetime(2026, 9, 26, 12, 0, tzinfo=timezone.utc)
+        stored = health.record({}, "market", steps, [], now=now, wall=44.96)
+        self.assertEqual(stored["market"]["seconds"], 45.0)
+        self.assertNotIn("seconds", health.record({}, "market", steps, [], now=now)["market"])
+        (part,) = health.for_page(stored)
+        self.assertEqual(part["seconds"], 45.0)
+        folder = tempfile.mkdtemp()
+        with open(os.path.join(folder, health.HEALTH_FILE), "w") as f:
+            json.dump(stored, f)
+        rows = doctor.last_updates(folder, now)
+        self.assertTrue(any(r[1] == "Took 45 s; longest: Filings 40 s, News 30 s, Prices 21 s." for r in rows), rows)
+        source = page_source()
+        self.assertIn("p.seconds != null ? ' · took '", template_function("renderHealth", source))
+        self.assertIn("pressed && res.timing", source)                 # a pressed company update says how long it took too
 
     def test_the_page_reads_the_refresh_as_it_goes(self):
         reader = template_function("readLines")
@@ -1031,6 +1066,9 @@ class CompanyDataOnItsOwnTests(unittest.TestCase):
         self.assertNotIn("refreshBtn", timer)
         market = template_function("updateMarket", page)
         self.assertIn("part: 'market'", market)
+        self.assertIn("pressed: !!pressed", market)                  # the button asks for news afresh; the timer does not
+        self.assertIn("if (ev.built) shown = shown.then(showMarket)", market)   # prices and filings shown as they come in,
+        self.assertIn("await shown;", market)                                    # one reload after another, none under a typing hand
         self.assertNotIn("account", market.replace("'account", ""))
         # the account's sync is sent from its button alone
         self.assertEqual(page.count("part: 'account'"), 1)

@@ -46,7 +46,7 @@ from email.utils import parsedate_to_datetime
 
 import earnings
 import universe
-from env_config import atomic_write_json, PARTLY
+from env_config import atomic_write_json, moment, PARTLY
 from news import NEWS_FILE, load_watchlist
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -54,6 +54,12 @@ HEADLINES_FILE = os.path.join(HERE, "headlines.json")
 # The desk's choices, both presentation and storage limits: a month of headlines per
 # company, and at most this many from each source — a large company has dozens a day.
 KEEP_DAYS = 30
+# A company's news is asked again no sooner than this after it was last asked (the desk's choice, 5 Oct 2026): the
+# company data updates every half hour, a request a company costs a polite pause, and the evidence the page shows news
+# for is about days (Tetlock et al. 2008; Heston & Sinha 2017), so a story reaches the page within the hour, not the half
+# hour. Under the update's own interval and over half of it: with the half hour between updates, every other one asks.
+ASK_AGAIN_MINUTES = 45
+ASK_AGAIN = timedelta(minutes=ASK_AGAIN_MINUTES)
 KEPT = 150
 LONGEST = 300                   # characters of a headline kept; a wire's are far shorter
 LEDE_WORDS = 25                 # Tetlock, Saar-Tsechansky & Macskassy (2008): the name within the first 25 words
@@ -267,7 +273,15 @@ def _fetched(stored, via):
     return dict(fetched.get(via) or {})
 
 
-def _merge(stored, via, tickers, fresh_for, now, prune, names):
+def _asked(stored, via):
+    """{ticker: the moment `via` last asked}, a stamp kept beside the day in `fetched`: the day sets what is
+    asked for, the moment how soon it is asked again. Anything but a map of stamps is no record."""
+    asked = ((stored or {}).get("asked") or {})
+    asked = asked.get(via) if isinstance(asked, dict) else None
+    return {t: m for t, m in asked.items() if isinstance(t, str) and moment(m)} if isinstance(asked, dict) else {}
+
+
+def _merge(stored, via, tickers, fresh_for, now, prune, names, skip_within=None, ask=None):
     """The store with one source's fresh stories merged in: for each of `tickers`, every
     story kept that is about the company, a month at most, KEPT from each source. The other
     source's stories and fetch days are kept as they are; with `prune`, companies no longer
@@ -277,34 +291,47 @@ def _merge(stored, via, tickers, fresh_for, now, prune, names):
     limit, a network gone, a page that is not a feed), nothing more is asked this time, what
     was read is kept, and the store says why under PARTLY (28 Sep 2026: a failure halfway
     lost every company's stories read before it, so a limit met at the same place every
-    half hour would have kept any from being stored)."""
+    half hour would have kept any from being stored).
+
+    `skip_within` (a timedelta) leaves a company alone that this source asked about more recently
+    than that and whose stories are kept; `ask` is the companies that may be asked this time, the
+    others left as they are (the update asks the ones whose names are known first, and the rest once
+    the filings have named them). Companies not followed any more are dropped whatever either says."""
     stored = stored or {}
     today = now.date()
     oldest = (today - timedelta(days=KEEP_DAYS)).isoformat()
     had = stored.get("companies") or {}
     fetched = {v: _fetched(stored, v) for v in SOURCES}
+    asked = {v: _asked(stored, v) for v in SOURCES}
     wanted = list(dict.fromkeys(str(t).upper() for t in tickers or []))
     companies = {t: had[t] for t in (wanted if prune else had) if t in had}
     if prune:
         fetched = {v: {t: d for t, d in days.items() if t in wanted} for v, days in fetched.items()}
+        asked = {v: {t: m for t, m in stamps.items() if t in wanted} for v, stamps in asked.items()}
+    allowed = None if ask is None else {str(t).upper() for t in ask}
+
+    def recent(ticker):
+        when = moment(asked[via].get(ticker))
+        return bool(skip_within and when and ticker in had and now - when < skip_within)
     failed = None
-    for ticker in sorted(wanted, key=lambda t: fetched[via].get(t) or ""):
+    for ticker in sorted(wanted, key=lambda t: asked[via].get(t) or fetched[via].get(t) or ""):
         filed = (names or {}).get(ticker)
         last = fetched[via].get(ticker)
         since = max(oldest, last) if last and ticker in had else oldest
         items = {i["id"]: dict(i, via=i.get("via", "finnhub")) for i in had.get(ticker) or []}
-        if failed is None:
+        if failed is None and (allowed is None or ticker in allowed) and not recent(ticker):
             try:
                 for item in fresh_for(ticker, since, filed):
                     items[item["id"]] = dict(item, via=via)
                 fetched[via][ticker] = today.isoformat()
+                asked[via][ticker] = now.isoformat(timespec="seconds")
             except (PressError, earnings.EarningsError) as e:
                 failed = str(e)
         keep = [i for i in items.values() if i["at"][:10] >= oldest and about(i, ticker, filed)]
         by_source = {v: sorted((i for i in keep if i["via"] == v), key=lambda i: i["at"],
                                reverse=True)[:KEPT] for v in SOURCES}
         companies[ticker] = sorted((i for v in SOURCES for i in by_source[v]), key=lambda i: i["at"], reverse=True)
-    out = {"companies": companies, "fetched": fetched, "source": "; ".join(SOURCES.values()),
+    out = {"companies": companies, "fetched": fetched, "asked": asked, "source": "; ".join(SOURCES.values()),
            "updated_at": now.isoformat(timespec="seconds")}
     if failed:
         out[PARTLY] = failed
@@ -320,18 +347,23 @@ def merge_company(stored, fresh, ticker):
     if ticker in ((fresh or {}).get("companies") or {}):
         out["companies"] = dict(out.get("companies") or {}, **{ticker: fresh["companies"][ticker]})
     fetched = {v: _fetched(out, v) for v in SOURCES}
+    asked = {v: _asked(out, v) for v in SOURCES}
     for v in SOURCES:
-        day = _fetched(fresh, v).get(ticker)
+        day, stamp = _fetched(fresh, v).get(ticker), _asked(fresh, v).get(ticker)
         if day:
             fetched[v][ticker] = day
+        if stamp:
+            asked[v][ticker] = stamp
     out["fetched"] = fetched
+    out["asked"] = asked
     for key in ("source", "updated_at"):
         if key not in out and (fresh or {}).get(key):
             out[key] = fresh[key]
     return out
 
 
-def update(tickers, stored=None, key=None, fetch=earnings.fetch, now=None, prune=True, names=None):
+def update(tickers, stored=None, key=None, fetch=earnings.fetch, now=None, prune=True, names=None, skip_within=None,
+           ask=None):
     """Finnhub's stories for each company, merged with those kept. A company is asked only
     for what came since the day it was last asked (that day included: a story can arrive
     late on it), and for a month the first time. With prune=False (one company followed
@@ -341,10 +373,11 @@ def update(tickers, stored=None, key=None, fetch=earnings.fetch, now=None, prune
     now = now or datetime.now(timezone.utc)
     return _merge(stored, "finnhub", tickers,
                   lambda t, since, filed: fetch_company(t, since, now.date().isoformat(), key, fetch=fetch),
-                  now, prune, names)
+                  now, prune, names, skip_within, ask)
 
 
-def update_press(tickers, stored=None, names=None, fetch=fetch_rss, now=None, prune=True, sleep=time.sleep):
+def update_press(tickers, stored=None, names=None, fetch=fetch_rss, now=None, prune=True, sleep=time.sleep,
+                 skip_within=None, ask=None):
     """The press's stories for each company, merged with those kept: searched over the days
     since the day it was last searched (that day included), and a month the first time."""
     now = now or datetime.now(timezone.utc)
@@ -353,7 +386,7 @@ def update_press(tickers, stored=None, names=None, fetch=fetch_rss, now=None, pr
     def fresh(ticker, since, filed):
         days = max(1, min(KEEP_DAYS, (today - date.fromisoformat(since)).days + 1))
         return fetch_press(ticker, filed, days, fetch=fetch, sleep=sleep)
-    return _merge(stored, "press", tickers, fresh, now, prune, names)
+    return _merge(stored, "press", tickers, fresh, now, prune, names, skip_within, ask)
 
 
 def load(path=None):

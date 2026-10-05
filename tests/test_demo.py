@@ -50,7 +50,11 @@ class DemoWorldTests(unittest.TestCase):
 
     def test_every_screen_has_something_on_it(self):
         d = self.data
-        self.assertEqual(len(d["companies"]), 11)                      # five held stocks, three funds, three followed
+        # each holding and each followed company has its card; how many stocks the account holds that day varies with
+        # the date (the account is drawn from it), so the count is not fixed here (5 Oct 2026: 13 where 11 had been)
+        held = {r["ticker"] for r in d["positions"]["rows"] if r["us_line"]}
+        self.assertEqual({c["ticker"] for c in d["companies"]}, held | set(generate_demo_data.FOLLOWED))
+        self.assertGreaterEqual(len(d["companies"]), 9)
         self.assertGreaterEqual(len([c for c in d["companies"] if c["rating"]]), 6)
         self.assertGreater(len(d["rating"]["buy_list"]), 0)
         self.assertGreater(d["rating"]["rated"], 100)
@@ -88,7 +92,17 @@ class DemoWorldTests(unittest.TestCase):
         self.assertGreater(risk["beta"]["explained"], 0.5)
         self.assertEqual(len(generate_demo_data.MARKET_LOADING), len(generate_demo_data.UNIVERSE))
         self.assertTrue(all(0 <= x < 1 for x in generate_demo_data.MARKET_LOADING))
-        self.assertEqual(len(self.data["trades"]["rows"]), 77)                  # the market's draws are apart: the account's own are unchanged
+        # the market's draws are a stream apart: the account's own random sequence is left where it was, one draw a line
+        # a weekday and nothing more, so every trade the generator then makes is the one it made before the market was shared
+        import random
+        walked = random.Random(generate_demo_data.SEED)
+        generate_demo_data.walks(walked, TODAY, generate_demo_data.DEMO_UNIVERSE)
+        start = TODAY - timedelta(days=int(365 * 2.6))
+        weekdays = sum(1 for n in range((TODAY - start).days + 1) if (start + timedelta(n)).weekday() < 5)
+        counted = random.Random(generate_demo_data.SEED)
+        for _ in range(weekdays * len(generate_demo_data.DEMO_UNIVERSE)):
+            counted.gauss(0, 1)
+        self.assertEqual(walked.random(), counted.random())
 
     def test_results_days_are_not_all_one_day(self):
         self.assertGreater(len({c["next_earnings"]["date"] for c in self.data["companies"] if c["next_earnings"]}), 3)

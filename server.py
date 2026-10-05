@@ -31,6 +31,7 @@ import json, os, re, subprocess, sys, threading, time, traceback
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from env_config import atomic_write_json, load_env, read_for_writing, UnreadableStore, PARTLY, SETUP_STEPS, scrub
+from health import timing   # noqa: F401  (the refresh's "Took …" line; health.py owns it)
 import analysts, asof, brief, broker, build_desk, context, diffs, earnings, fundamentals, headlines, health, looks, news, paper, plans, prices, rating, research, screen, sectors, summarise, t212, thesis, trade_check, universe, value
 
 HOST, PORT = "127.0.0.1", 8935
@@ -55,9 +56,9 @@ IN_PROCESS_SYNC = False
 # phone.py sets this too: the rating's universe and industry codes are large downloads,
 # built on the Mac and brought to the phone in a bundle, never fetched on the phone
 ON_PHONE = False
+ON_THE_PAGE = ("Prices on the page", "Filings on the page")      # the steps of a company update that rebuild the page early
 HEARTBEAT = 10               # seconds between blank lines while a refresh runs, so no
                              # browser, web view or network takes the connection for dead
-SLOWEST_SHOWN = 3            # steps named in the time a refresh took: a presentation limit
 MAX_BODY = 16 * 1024
 # Two refreshes, apart, so the company data never depends on the broker. The account: the
 # broker alone, when the user presses sync. The market: filings, prices, financials,
@@ -141,6 +142,8 @@ class Handler(BaseHTTPRequestHandler):
     folder = HERE
     demo = False
     remote_hosts = frozenset()           # desk_hosts(), set when the server starts
+    pressed = False                      # this company update was asked for by the button: news is asked afresh
+    unfinished = frozenset()             # the steps of the run in hand that have not ended (run_steps)
 
     def log_message(self, *args):        # keep the terminal quiet
         pass
@@ -238,6 +241,7 @@ class Handler(BaseHTTPRequestHandler):
             # {"part": "account"} syncs the broker; {"part": "market"} the company data.
             # Sent with neither (an older page, ./refresh.sh's habit), it is the account.
             part = body.get("part") if body.get("part") in ("account", "market") else "account"
+            self.pressed = body.get("pressed") is True
             lock, work = ((account_lock, self.refresh_account) if part == "account"
                           else (market_lock, self.refresh_market))
             if not lock.acquire(blocking=False):
@@ -311,7 +315,7 @@ class Handler(BaseHTTPRequestHandler):
     def refresh_account(self, report=lambda event: None):
         """The account, from the broker .env names (broker.py): the page is rebuilt as soon as
         it has answered. `report` hears each step start and end."""
-        timed = []
+        timed, began = [], time.monotonic()
         if self.demo:
             self.build()
             return 200, {"ok": True, "message": None, "timing": None}
@@ -320,12 +324,13 @@ class Handler(BaseHTTPRequestHandler):
             return 200, {"ok": False, "message": problem}
         name = broker.BROKERS[key]["name"]
         failed = self.run_steps([(name[:1].upper() + name[1:], self.sync_account)], report, timed)
-        self.record_health("account", timed, failed)
+        wall = time.monotonic() - began
+        self.record_health("account", timed, failed, wall)
         if failed:
             return 200, {"ok": False, "message": failed[0][1]}
         self.build()
         report({"built": True})
-        return 200, {"ok": True, "message": None, "timing": timing(timed)}
+        return 200, {"ok": True, "message": None, "timing": timing(timed, wall)}
 
     @staticmethod
     def failures(problems):
@@ -340,24 +345,26 @@ class Handler(BaseHTTPRequestHandler):
             return group[0] if len(group) == 1 else ", ".join(group[:-1]) + " and " + group[-1]
         return "; ".join(f"{names(group)}: {why}" for why, group in by_reason.items()) or None
 
-    def record_health(self, part, timed, failed):
-        """What each step did, for the page's "Data sources" row and doctor.py."""
+    def record_health(self, part, timed, failed, wall=None):
+        """What each step did, and how long the run took by the clock, for the page's "Data sources"
+        row and doctor.py."""
         with health_lock:
             atomic_write_json(os.path.join(self.folder, health.HEALTH_FILE),
-                              health.record(health.load(self.folder), part, timed, failed))
+                              health.record(health.load(self.folder), part, timed, failed, wall=wall))
 
     def refresh_market(self, report=lambda event: None):
         """Everything but the account: filings, prices, financials, results, ratings and
         research. No step reaches the broker."""
-        timed = []
+        timed, began = [], time.monotonic()
         problems = [] if self.demo else self.update_research(report, timed)
+        wall = time.monotonic() - began
         if not self.demo:
-            self.record_health("market", timed, problems)
+            self.record_health("market", timed, problems, wall)
         self.build()
         # a key not added yet is a step to take, said apart from what failed
         failed = [p for p in problems if p[1] not in SETUP_STEPS]
         setup = list(dict.fromkeys(why for _, why in problems if why in SETUP_STEPS))
-        return 200, {"ok": True, "message": self.failures(failed), "setup": setup, "timing": timing(timed)}
+        return 200, {"ok": True, "message": self.failures(failed), "setup": setup, "timing": timing(timed, wall)}
 
     def sync_account(self):
         """t212.py in its own process, as ./refresh.sh runs it; on a phone, in this one. Another
@@ -420,6 +427,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError(f"{name} waits for a step that does not come before it")
         ended = {s[0]: threading.Event() for s in steps}
         failed, times = {}, {}
+        # for a step that asks whether it is nearly the last (update_research); a plain set, read and changed
+        # by C-level operations that the interpreter does not interrupt
+        self.unfinished = left = {s[0] for s in steps}
 
         def run(i, name, step):
             report({"step": name, "state": "running"})
@@ -446,6 +456,7 @@ class Handler(BaseHTTPRequestHandler):
                 state = "failed"
             finally:
                 times[i] = (name, time.monotonic() - started)
+                left.discard(name)
                 try:
                     report({"step": name, "state": state, "seconds": round(times[i][1], 1)})
                 finally:
@@ -472,6 +483,16 @@ class Handler(BaseHTTPRequestHandler):
         timed.extend(times[i] for i in sorted(times))
         return [failed[i] for i in sorted(failed)]
 
+    def show_partway(self, report):
+        """The prices, or the filings, are in: the page is rebuilt now and says so, so that they are on it while
+        the rest of the update (the slowest part, the news) is still being asked for. Not when only the desk's own
+        last steps remain, which the update's own rebuild follows at once."""
+        if not (self.unfinished - set(ON_THE_PAGE) - {"Ratings", "Research"}):
+            return None, None
+        self.build()
+        report({"built": True})
+        return None, None
+
     def update_research(self, report, timed):
         """Filings, news, prices, fundamentals, earnings, ratings and research. A source
         that fails is reported; the rest still update."""
@@ -496,6 +517,22 @@ class Handler(BaseHTTPRequestHandler):
         also = self.held_companies(held, watchlist)
         covered = watchlist + also
         news_file, headlines_file = os.path.join(self.folder, "news_data.json"), os.path.join(self.folder, "headlines.json")
+        # a company's news is asked again no sooner than headlines.ASK_AGAIN, unless the button was pressed
+        again = None if self.pressed else headlines.ASK_AGAIN
+        # A story counts when it names the company (headlines.about), by the name its filings give. The companies
+        # whose filings have named them already are asked for their stories at once, beside the filings; those the
+        # filings have not named yet (first time covered) once this update's filings have, as before (5 Oct 2026:
+        # the news waited for the filings, the slowest chain of the update, for names it mostly had).
+        filed = self.filed_names()
+        named = [t for t in covered if filed.get(t)]
+        new = [t for t in covered if t not in named]
+        late = (("News (companies new to the desk)", lambda: (headlines.update(
+                    covered, stored=build_desk.load_json(headlines_file, {}), names=self.filed_names(), skip_within=again,
+                    ask=new), "headlines.json"), "finnhub", ("Filings", "News from the FT and the press")),
+                ("News from the FT and the press (companies new to the desk)", lambda: (headlines.update_press(
+                    covered, stored=build_desk.load_json(headlines_file, {}), names=self.filed_names(), skip_within=again,
+                    ask=new), "headlines.json"), "press", ("News (companies new to the desk)",))) if new else ()
+        show = lambda: self.show_partway(report)
         # each source in its own lane, one request at a time as its limits ask, the lanes side by
         # side; a step reading what an earlier one writes waits for it (run_steps)
         steps = (
@@ -527,8 +564,7 @@ class Handler(BaseHTTPRequestHandler):
                                                             slow=rating.load_sample(self.folder).get("tickers") or []),
                                               "prices.json"), "tiingo", ("Rating sample",)),
             # Finnhub: results dates, analysts' ratings, and what was written about each company
-            # since the last update, once the filings have named each company (a story counts when it
-            # names it, headlines.about); the FT and the press (Google News) in a lane of their own,
+            # since the last update; the FT and the press (Google News) in a lane of their own,
             # once Finnhub's stories are written, since both write the one store of stories
             ("Earnings", lambda: (earnings.update(
                 covered, stored=build_desk.load_json(os.path.join(self.folder, "earnings_data.json"), {})),
@@ -536,9 +572,16 @@ class Handler(BaseHTTPRequestHandler):
             ("Analyst ratings", lambda: (analysts.update(covered, stored=build_desk.load_json(
                 os.path.join(self.folder, "analysts_data.json"), {})), "analysts_data.json"), "finnhub", ()),
             ("News", lambda: (headlines.update(covered, stored=build_desk.load_json(headlines_file, {}),
-                                               names=self.filed_names()), "headlines.json"), "finnhub", ("Filings",)),
+                                               names=self.filed_names(), skip_within=again, ask=named), "headlines.json"),
+             "finnhub", ()),
             ("News from the FT and the press", lambda: (headlines.update_press(covered, stored=build_desk.load_json(
-                headlines_file, {}), names=self.filed_names()), "headlines.json"), "press", ("News",)),
+                headlines_file, {}), names=self.filed_names(), skip_within=again, ask=named), "headlines.json"),
+             "press", ("News",)),
+            *late,
+            # each shown as soon as it is in, while the lanes still asking go on (5 Oct 2026, the owner: "update
+            # companies and refresh the desk faster": the page waited for the slowest chain to end)
+            (ON_THE_PAGE[0], show, "page: prices", ("Prices", "Latest prices")),
+            (ON_THE_PAGE[1], show, "page: filings", ("Filings", "Financials")),
             # the desk's own work, once what it reads is in
             ("Ratings", self.log_ratings(watchlist + held), "desk",
              ("Prices", "Stock exchanges", "Industry codes", "Company universe", "Rating sample", "Rating sample prices")),
@@ -954,22 +997,6 @@ class Handler(BaseHTTPRequestHandler):
             fresh = build_desk.load_json(os.path.join(self.folder, "desk_data.json"), {})
         return 200, {"ok": True, "news": fresh.get("news"),
                      "pending": any(t not in {i.get("ticker") for i in stored.get("items") or []} for t in saved)}
-
-
-def timing(steps):
-    """How long the refresh took, and its SLOWEST_SHOWN longest steps: "Took 1 min 12 s;
-    longest: Financials 38 s, Prices 21 s, Trading 212 6 s." None for a refresh with
-    no steps (the demo)."""
-    if not steps:
-        return None
-    longest = sorted(steps, key=lambda s: s[1], reverse=True)[:SLOWEST_SHOWN]
-    return (f"Took {duration(sum(s for _, s in steps))}; longest: "
-            + ", ".join(f"{name} {duration(s)}" for name, s in longest) + ".")
-
-
-def duration(seconds):
-    whole = int(round(seconds))
-    return f"{whole} s" if whole < 60 else f"{whole // 60} min {whole % 60} s"
 
 
 def _number(v):

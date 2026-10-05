@@ -91,16 +91,23 @@ async function updateMarket(pressed){
   const say = t => { $('marketMsg').textContent = t; };
   safe(renderMarketAt);
   try {
-    const r = await fetch('/refresh', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({part: 'market'})});
+    const r = await fetch('/refresh', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({part: 'market', pressed: !!pressed})});
     if (!r.ok){ if (pressed) say((await r.json()).message || ''); return; }
-    const res = await readLines(r, ev => { if (pressed && ev.step && ev.state === 'running') say('Updating companies: ' + ev.step.toLowerCase() + '…'); });
+    // the prices, then the filings, are shown as they come in, one reload after another and not while something is being typed
+    let shown = Promise.resolve();
+    const res = await readLines(r, ev => {
+      if (ev.built) shown = shown.then(showMarket).catch(() => {});
+      else if (pressed && ev.step && ev.state === 'running') say('Updating companies: ' + ev.step.toLowerCase() + '…');
+    });
+    await shown;
     if (!res) throw new TypeError('no result');
     // keys not added yet are said apart from what failed: the desk is waiting for them, not broken
     const setup = res.setup || [];
     $('marketMsg').classList.toggle('progress', !res.message);
     say((res.message ? 'Companies updated, except ' + res.message + (setup.length ? '. Also to do: ' : '') : '') +
         (!res.message && setup.length ? 'Company data is waiting for a few free keys. ' : '') +
-        setup.join('; '));
+        setup.join('; ') +
+        (pressed && res.timing ? ((res.message || setup.length) ? ' · ' : '') + res.timing : ''));   // pressed: how long it took
     marketRunning = false;
     await showMarket();
   } catch(err){

@@ -28,6 +28,67 @@ class SyncTests(unittest.TestCase):
         second = t212.sync(c2, first, log=lambda *_: None)
         self.assertEqual([x["order"]["id"] for x in second["orders"]], [7, 6, 5, 4, 3, 2, 1])
 
+    def test_the_five_first_requests_go_together(self):
+        """The summary, the positions and the first page of each of the three histories do not wait on one
+        another: all five must be in flight at once. A barrier of five lets none through until the fifth
+        has arrived, so one after another it would time out; each history's later pages stay in turn."""
+        barrier, order, lock = threading.Barrier(5, timeout=10), [], threading.Lock()
+
+        def opener(req, timeout):
+            url = req.full_url.split("/api/v0", 1)[1]
+            path, _, query = url.partition("?")
+            with lock:
+                order.append((path, query))
+            if "cursor" not in query:
+                barrier.wait()                               # BrokenBarrierError, then a failed sync, if not all five came
+            if path == "/equity/account/summary":
+                return FakeResponse({"currency": "USD", "totalValue": 10})
+            if path == "/equity/positions":
+                return FakeResponse([])
+            page = int(dict(p.split("=") for p in query.split("&")).get("cursor", 0))
+            more = f"/api/v0{path}?limit=50&cursor={page + 1}" if page == 0 and path.endswith("orders") else None
+            return FakeResponse({"items": [{"order": {"id": 10 - page}, "fill": {}}] if path.endswith("orders") else [],
+                                 "nextPagePath": more})
+        client = t212.Client("k", "s", "demo", opener=opener, sleep=lambda s: None)
+        out = t212.sync(client, {}, log=lambda *_: None)
+        self.assertEqual([o["order"]["id"] for o in out["orders"]], [10, 9])           # the pages of one history, in turn
+        firsts = [p for p, q in order if "cursor" not in q]
+        self.assertEqual(sorted(firsts), sorted(["/equity/account/summary", "/equity/positions",
+                                                  "/equity/history/orders", "/equity/history/dividends",
+                                                  "/equity/history/transactions"]))
+        self.assertLess(order.index(("/equity/history/orders", "limit=50")),
+                        order.index(("/equity/history/orders", "limit=50&cursor=1")))
+
+    def test_the_first_failure_is_the_first_of_them_in_the_old_order(self):
+        """Asked together, answered in order: when the summary and a history both fail, the summary's reason
+        is the one said, as it was when they went one after another. A stranger's page in place of the
+        account is still no account, and nothing is changed."""
+        def opener(req, timeout):
+            path = req.full_url.split("/api/v0", 1)[1].partition("?")[0]
+            if path == "/equity/account/summary":
+                raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, None)
+            if path == "/equity/history/orders":
+                raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, None)
+            return FakeResponse([] if path == "/equity/positions" else {"items": [], "nextPagePath": None})
+        client = t212.Client("k", "s", "demo", opener=opener, sleep=lambda s: None)
+        with self.assertRaises(t212.T212Error) as cm:
+            t212.sync(client, {"orders": [{"order": {"id": 1}}]}, log=lambda *_: None)
+        self.assertIn("rejected the key", str(cm.exception))
+        def only_orders_refused(req, timeout):
+            if req.full_url.endswith("history/orders?limit=50"):
+                raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, None)
+            return FakeResponse({"currency": "USD"} if "summary" in req.full_url
+                                else [] if "positions" in req.full_url else {"items": [], "nextPagePath": None})
+        only_orders = t212.Client("k", "s", "demo", sleep=lambda s: None, opener=only_orders_refused)
+        with self.assertRaises(t212.T212Error) as cm:
+            t212.sync(only_orders, {}, log=lambda *_: None)
+        self.assertIn("History", str(cm.exception))
+        empty = t212.Client("k", "s", "demo", sleep=lambda s: None, opener=lambda req, timeout: FakeResponse(
+            {} if "summary" in req.full_url else [] if "positions" in req.full_url else {"items": [], "nextPagePath": None}))
+        with self.assertRaises(t212.T212Error) as cm:
+            t212.sync(empty, {}, log=lambda *_: None)
+        self.assertIn("without the account in it", str(cm.exception))
+
     def test_rate_limit_waits_then_retries(self):
         slept, state = [], {"n": 0}
 

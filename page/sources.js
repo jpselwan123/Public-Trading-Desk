@@ -9,7 +9,8 @@ function renderHealth(){
   const gist = [failed ? failed + ' failed at the last update' : '', waiting ? waiting + ' waiting for a key' : '']
     .filter(Boolean).join(' · ') || 'all working at the last update';
   $('healthRow').innerHTML = foldOpen('Data sources', gist) +
-    H.map(p => '<div class="br-block"><div class="br-h">' + esc(p.label) + ' · ' + fmtStamp(p.at, '') + '</div>' +
+    H.map(p => '<div class="br-block"><div class="br-h">' + esc(p.label) + ' · ' + fmtStamp(p.at, '') +
+      (p.seconds != null ? ' · took ' + (p.seconds < 60 ? Math.round(p.seconds) + ' s' : Math.floor(p.seconds / 60) + ' min ' + Math.round(p.seconds % 60) + ' s') : '') + '</div>' +
       p.steps.map(st => '<div class="br-row"><span>' + esc(st.name) + '</span><span>' +
         (st.ok ? 'working' + (st.seconds != null ? ' · ' + st.seconds + ' s' : '')
                : st.setup ? '<b>waiting for a key</b>: ' + esc(st.why || '')

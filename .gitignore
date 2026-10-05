@@ -15,6 +15,7 @@ diffs.json
 news_data.json
 headlines.json
 health.json
+.update_checked
 looks.json
 plans.json
 rating_sample.json

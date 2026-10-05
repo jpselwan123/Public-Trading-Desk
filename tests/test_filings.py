@@ -654,6 +654,80 @@ class CompanyNewsTests(unittest.TestCase):
         headlines.update(["BRK.B", "A&B"], key="k", fetch=lambda path, key: asked.append(path) or [], now=self.NOW)
         self.assertIn("symbol=A%26B&", asked[-1])
 
+    def test_a_company_is_not_asked_again_within_the_window_unless_the_button_was_pressed(self):
+        """The company data updates every half hour and news is about days: a company asked within
+        ASK_AGAIN_MINUTES is left as it is (its stories kept, its stamp not moved), the button asks afresh,
+        and a day's window, which sets what is asked for, is untouched by any of it."""
+        asked = []
+
+        def fetch(path, key):
+            asked.append(path.split("symbol=")[1].split("&")[0])
+            return [self.row(1, self.NOW - timedelta(hours=2))]
+        again = headlines.ASK_AGAIN
+        self.assertEqual(again, timedelta(minutes=headlines.ASK_AGAIN_MINUTES))
+        store = headlines.update(["AAA", "BBB"], key="k", fetch=fetch, now=self.NOW, names=self.NAMES, skip_within=again)
+        self.assertEqual(sorted(asked), ["AAA", "BBB"])                                 # never asked: asked
+        self.assertEqual(store["asked"]["finnhub"], {"AAA": "2026-09-26T12:00:00+00:00", "BBB": "2026-09-26T12:00:00+00:00"})
+        asked.clear()
+        soon = self.NOW + timedelta(minutes=30)
+        kept = headlines.update(["AAA", "BBB"], stored=store, key="k", fetch=fetch, now=soon, names=self.NAMES, skip_within=again)
+        self.assertEqual(asked, [])                                                     # half an hour: left alone
+        self.assertEqual(kept["companies"], store["companies"])
+        self.assertEqual(kept["asked"], store["asked"])                                 # the moment is the last asking's
+        self.assertEqual(kept["fetched"], store["fetched"])
+        headlines.update(["AAA", "BBB"], stored=store, key="k", fetch=fetch, now=soon, names=self.NAMES)   # pressed: no window
+        self.assertEqual(sorted(asked), ["AAA", "BBB"])
+        asked.clear()
+        due = self.NOW + timedelta(minutes=headlines.ASK_AGAIN_MINUTES, seconds=1)
+        later = headlines.update(["AAA", "BBB"], stored=store, key="k", fetch=fetch, now=due, names=self.NAMES, skip_within=again)
+        self.assertEqual(sorted(asked), ["AAA", "BBB"])                                 # past the window: asked again
+        self.assertEqual(later["asked"]["finnhub"]["AAA"], due.isoformat(timespec="seconds"))
+        # a company with no stored stories (never read) is asked whatever its stamp says
+        asked.clear()
+        lone = {"companies": {}, "fetched": {}, "asked": {"finnhub": {"AAA": self.NOW.isoformat()}}}
+        headlines.update(["AAA"], stored=lone, key="k", fetch=fetch, now=soon, names=self.NAMES, skip_within=again)
+        self.assertEqual(asked, ["AAA"])
+
+    def test_a_damaged_record_of_askings_is_no_record(self):
+        for bad in ("x", ["AAA"], {"finnhub": "x"}, {"finnhub": {"AAA": "not a time", 7: "2026-09-26T12:00:00+00:00"}}, None):
+            with self.subTest(bad=bad):
+                self.assertEqual(headlines._asked({"asked": bad}, "finnhub"), {})
+        self.assertEqual(headlines._asked({"asked": {"press": {"AAA": "2026-09-26T12:00:00Z"}}}, "press"),
+                         {"AAA": "2026-09-26T12:00:00Z"})
+        self.assertEqual(headlines._asked({}, "press"), {})
+
+    def test_only_the_companies_asked_for_are_asked_and_none_is_lost(self):
+        """`ask` is who may be asked this time; the others keep what they have, and a company no longer
+        followed is still dropped. It lets the update ask the companies whose names are known at once and
+        the rest once the filings have named them."""
+        asked = []
+
+        def fetch(path, key):
+            asked.append(path.split("symbol=")[1].split("&")[0])
+            return [self.row(2, self.NOW - timedelta(hours=1))]
+        store = headlines.update(["AAA", "BBB", "CCC"], key="k", fetch=fetch, now=self.NOW, names=self.NAMES)
+        self.assertEqual(sorted(asked), ["AAA", "BBB", "CCC"])
+        asked.clear()
+        later = self.NOW + timedelta(hours=2)
+        part = headlines.update(["AAA", "BBB"], stored=store, key="k", fetch=fetch, now=later, names=self.NAMES, ask=["AAA"])
+        self.assertEqual(asked, ["AAA"])
+        self.assertEqual(sorted(part["companies"]), ["AAA", "BBB"])                    # BBB kept, CCC no longer followed
+        self.assertEqual(part["companies"]["BBB"], store["companies"]["BBB"])
+        self.assertEqual(part["asked"]["finnhub"]["BBB"], store["asked"]["finnhub"]["BBB"])
+        self.assertNotIn("CCC", part["asked"]["finnhub"])
+        asked.clear()
+        headlines.update(["AAA", "BBB"], stored=part, key="k", fetch=fetch, now=later, names=self.NAMES, ask=[])
+        self.assertEqual(asked, [])
+
+    def test_following_a_company_records_when_its_news_was_asked(self):
+        fetch = lambda path, key: [self.row(3, self.NOW - timedelta(hours=1))]
+        fresh = headlines.update(["AAA"], key="k", fetch=fetch, now=self.NOW, prune=False, names=self.NAMES)
+        base = headlines.update(["BBB"], key="k", fetch=fetch, now=self.NOW - timedelta(days=1), names=self.NAMES)
+        once = headlines.merge_company(base, fresh, "AAA")
+        self.assertEqual(once["asked"]["finnhub"]["AAA"], "2026-09-26T12:00:00+00:00")
+        self.assertEqual(once["asked"]["finnhub"]["BBB"], base["asked"]["finnhub"]["BBB"])
+        self.assertEqual(headlines.merge_company(once, fresh, "AAA"), once)            # made twice, changes nothing more
+
     def test_news_reaches_the_first_session_it_could_move(self):
         at = lambda d, hh, mm=0: datetime(2026, 9, d, hh, mm, tzinfo=timezone.utc)
         # New York on summer time (UTC-4): the close is 20:00 UTC
@@ -813,7 +887,11 @@ class NewsSourcesTests(unittest.TestCase):
         self.assertTrue(all(q.endswith("when:3d") for q in asked), asked)                  # since the last, that day too
         source = inspect.getsource(server.Handler.update_research)
         self.assertLess(source.index("headlines.update(covered"), source.index("headlines.update_press(covered"))
-        self.assertIn('"headlines.json"), "press", ("News",))', source)   # both write the stories: one after the other
+        # both write the stories, so one after the other: the press once Finnhub's are written, and the companies the
+        # filings had not named when the update began once those are, after the filings and after the first passes
+        self.assertRegex(source, r'"headlines.json"\),\s*"press", \("News",\)\)')
+        self.assertIn('"finnhub", ("Filings", "News from the FT and the press"))', source)
+        self.assertIn('"press", ("News (companies new to the desk)",))', source)
         self.assertIn("headlines.PressError", inspect.getsource(server.Handler.run_steps))
 
     def test_the_same_story_from_several_outlets_is_one_line(self):

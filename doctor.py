@@ -225,6 +225,9 @@ def last_updates(folder, now):
         failed = [s for s in part["steps"] if not s.get("ok")]
         rows.append((part["label"], f"{str(part['at'])[:16].replace('T', ' ')} UTC ({ago(part['at'], now)}), "
                                     f"{len(part['steps']) - len(failed)} of {len(part['steps'])} steps ok"))
+        timed = [(s["name"], s["seconds"]) for s in part["steps"] if isinstance(s.get("seconds"), (int, float))]
+        if timed:                       # where the time went, as the page's Data sources row has it: names and seconds only
+            rows.append(("", health.timing(timed, part.get("seconds"))))
         for s in failed:
             rows.append(("", f"{'WAITING FOR A KEY' if s.get('setup') else 'FAILED'} {s['name']}: {s.get('why')}; last worked "
                              + (ago(s['last_ok'], now) if s.get("last_ok") else "never")))

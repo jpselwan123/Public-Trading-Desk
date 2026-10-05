@@ -257,7 +257,7 @@ class NativeAppTests(unittest.TestCase):
             git(dev, "remote", "add", "origin", origin); git(dev, "push", "-q", "origin", "main")
             git(root, "clone", "-q", "-b", "main", origin, mac)
             run = lambda: subprocess.run(["bash", os.path.join(mac, "update.sh")], capture_output=True, text=True,
-                                         env=dict(os.environ, UPDATE_WAIT="5")).stdout
+                                         env=dict(os.environ, UPDATE_WAIT="5", UPDATE_RECENT="0")).stdout
             self.assertIn("off (AUTO_UPDATE=1 in .env turns it on)", run())
             with open(os.path.join(mac, ".env"), "w") as f:
                 f.write("AUTO_UPDATE=1\n")
@@ -277,6 +277,27 @@ class NativeAppTests(unittest.TestCase):
             git(mac, "checkout", "-q", "file.txt")
             git(mac, "checkout", "-q", "-b", "other")
             self.assertIn("not on main", run())
+            git(mac, "checkout", "-q", "main")
+            # a desk opened again at once does not ask GitHub again; UPDATE_RECENT=0, or time, does
+            quick = lambda **env: subprocess.run(["bash", os.path.join(mac, "update.sh")], capture_output=True, text=True,
+                                                 env=dict(os.environ, UPDATE_WAIT="5", **env)).stdout
+            self.assertIn("updated to", quick(UPDATE_RECENT="0"))                      # asks, and notes the time it was answered
+            self.assertTrue(read(os.path.join(mac, ".update_checked")).strip().isdigit())
+            with open(os.path.join(dev, "file.txt"), "w") as f:
+                f.write("v4")
+            git(dev, "commit", "-qam", "v4"); git(dev, "push", "-q", "origin", "main")
+            self.assertRegex(quick(), r"asked GitHub \d+s ago; opening on")             # the default window: not asked again
+            self.assertNotEqual(read(os.path.join(mac, "file.txt")), "v4")
+            with open(os.path.join(mac, ".update_checked"), "w") as f:
+                f.write("not a time")
+            self.assertIn("updated to", quick())                                       # a damaged note is no note
+            self.assertEqual(read(os.path.join(mac, "file.txt")), "v4")
+            with open(os.path.join(mac, ".update_checked"), "w") as f:
+                f.write(str(int(time.time()) + 99999))                                 # a clock that went back: asks again
+            git(dev, "commit", "-q", "--allow-empty", "-m", "v5"); git(dev, "push", "-q", "origin", "main")
+            self.assertIn("updated to", quick())
+            self.assertIn(".update_checked", self.read(".gitignore"))
+            self.assertIn("UPDATE_RECENT", self.read("update.sh"))
 
     def test_the_icon_is_drawn_from_its_one_source(self):
         """icon.html says build.sh --icon draws AppIcon.icns from it. That step exists,
