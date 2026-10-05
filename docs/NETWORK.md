@@ -24,6 +24,8 @@ images. Its two typefaces (Archivo and IBM Plex Sans, under the SIL Open Font Li
 | `finnhub.io` | Results dates, analysts' estimates, company news; a real-time quote for the Chart tab | A ticker and a date range, or the ticker of a chart you have open; your Finnhub key, in a request header | Company updates, and every few seconds while a live chart is on show |
 | `query1.finance.yahoo.com` | The Chart tab's whole-market price and minute bars, **only if you set `YAHOO_CHART=1` in `.env`**. Yahoo has no public interface for this and can change or close it without notice; the request is made as a browser would make it | The ticker of a chart you have open | Every 10 seconds at most while a live chart is on show |
 | `data.alpaca.markets` | The Chart tab's IEX trades and bars down to the minute, only if you put an Alpaca key pair in `.env`. Reads only; nothing is traded | The ticker of a chart you have open and a start date; your Alpaca key pair, in request headers | Every few seconds while a live chart is on show |
+| `stream.data.alpaca.markets` | The Chart tab's live trades, as they happen (IEX's), over a WebSocket, only if you put an Alpaca key pair in `.env` and have a chart open. Reads only; the connection is signed in and subscribed to trades, and nothing else is sent | Your Alpaca key pair, in the sign-in message; the tickers of the charts you have open (at most five) | While a chart is open, and 90 seconds after; then the connection is closed |
+| `ws.finnhub.io` | The Chart tab's live trades, over a WebSocket, only if you have a Finnhub key and a chart open. Reads only | Your Finnhub key, **in the address the connection is opened at, which is how Finnhub takes it**; the tickers of the charts you have open (at most five) | While a chart is open, and 90 seconds after; then the connection is closed |
 | `fred.stlouisfed.org` | The Treasury bill rate and exchange rates, as public CSV files | A series name. No key | Company updates |
 | `news.google.com` | News from the FT, Reuters, Bloomberg and others, through Google News's search feed | Search terms: the company's name, an outlet's domain and a number of days. No key | Company updates |
 | `api.openai.com` | A plain-English company summary, a week's news brief, or an answer in the Ask chat | The company's public figures (from filings and prices) or its headlines; for Ask, your question, the last few turns of the talk, and the figures the desk holds for the company on show; your OpenAI key. **Only when you ask.** It is never sent your trades or notes. Your holdings go only if you tick "Include my holdings" in Ask, and then as each holding's ticker, share of the holdings, gain on cost in percent, days held and the desk's rating: no quantity, value or balance | On request only |
@@ -46,8 +48,9 @@ You don't have to take any of this on trust:
 
 - **Start with no keys at all.** `./desk.sh --demo` runs on made-up data. Or use a CSV export
   (`BROKER=csv`, [`BROKERS.md`](BROKERS.md)), which needs no key and no connection to your broker.
-- **Read the network code.** Every request goes through Python's `urllib`. Search the code for
-  `urlopen` and `Request(`. The broker readers are short: `t212.py`, `broker_alpaca.py`,
+- **Read the network code.** Every request goes through Python's `urllib`, except the live trade streams, which
+  `wsclient.py` opens over a socket itself (a small WebSocket client; the only module that does) and which send
+  only a sign-in and the tickers to follow. Search the code for `urlopen`, `Request(` and `create_connection`. The broker readers are short: `t212.py`, `broker_alpaca.py`,
   `broker_ibkr.py`, `broker_csv.py`.
 - **Watch it.** Run the desk behind a firewall that shows outgoing connections (Little Snitch or
   LuLu on a Mac, `ss -tp` or OpenSnitch on Linux) and compare what you see with the table above.

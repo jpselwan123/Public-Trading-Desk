@@ -1,6 +1,6 @@
 """What every test file shares: the project on the path, its modules, and the helpers.
 No network, no keys. Run: python3 -m unittest discover -s tests -t tests"""
-import ast, contextlib, inspect, io, json, os, random, re, shutil, socket, ssl, subprocess, sys, tempfile, threading, time, unittest, urllib.error, urllib.parse, urllib.request, zipfile
+import ast, base64, contextlib, inspect, io, json, os, random, re, shutil, socket, ssl, subprocess, sys, tempfile, threading, time, unittest, urllib.error, urllib.parse, urllib.request, zipfile
 from datetime import date, datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 
@@ -8,7 +8,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import prices as prices_module  # noqa: E402
-import analysts, asof, t212, backtest, brief, bridge, build_desk, charts, chat, context, diffs, doctor, earnings, env_config, feeds, forecasts, fundamentals, habits, headlines, health, looks, news, plans, paper, phone, prices, rating, research, scores, screen, sectors, server, summarise, thesis, trade_check, uncertainty, universe, value, generate_demo_data  # noqa: E402
+import analysts, asof, t212, backtest, brief, bridge, build_desk, charts, chat, context, diffs, doctor, earnings, env_config, feeds, forecasts, fundamentals, habits, headlines, health, looks, news, plans, paper, phone, prices, rating, research, scores, screen, sectors, server, stream, summarise, thesis, trade_check, uncertainty, universe, value, generate_demo_data  # noqa: E402
 import phone_bundle  # noqa: E402
 
 
@@ -29,6 +29,14 @@ def _keep_the_suite_off_the_network():
             raise NetworkInATest(f"a test asked the network for {host}: give it a stand-in")
         return connect(self)
     http.client.HTTPConnection.connect = guarded
+    # wsclient opens a socket itself; the same rule holds for it
+    made = socket.create_connection
+
+    def guarded_socket(address, *args, **kw):
+        if address[0] not in ("127.0.0.1", "localhost", "::1"):
+            raise NetworkInATest(f"a test asked the network for {address[0]}: give it a stand-in")
+        return made(address, *args, **kw)
+    socket.create_connection = guarded_socket
 
 
 _keep_the_suite_off_the_network()

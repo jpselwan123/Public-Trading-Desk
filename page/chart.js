@@ -68,7 +68,8 @@ function pcHeadDraw(){
   host.innerHTML = '<div class="pc-name"><b>' + esc(d.ticker) + '</b>' + esc(pcName(d.ticker)) + '</div>' +
     '<div class="pc-price"><span class="big">' + esc(pricePer(p.price, d.currency)) + '</span>' +
     (p.change == null ? '' : '<span class="pc-chg">' + pct1(p.change, true) + (p.at ? ' today' : ' on ' + esc(fmtDay(p.close_day))) + '</span>') + '</div>' +
-    '<div class="pc-sub">' + when + (p.via ? ' · via ' + esc(p.via) : '') + (d.live && d.every_seconds ? ' · updates every ' + pcAge(d.every_seconds) : '') +
+    '<div class="pc-sub">' + when + (p.via ? (p.stream ? ' · live trade from ' : ' · via ') + esc(p.via) : '') +
+    (d.live ? ((d.streaming || []).length ? ' · every trade as it comes' : d.every_seconds ? ' · updates every ' + pcAge(d.every_seconds) : '') : '') +
     (d.demo ? ' · demo prices' : '') + '</div>';
 }
 // a length of time as it is read: seconds under a minute and a half, else minutes
@@ -80,7 +81,7 @@ function pcNoteDraw(forcedLine){
     : d && d.kind === 'intraday' ? 'New York time, regular session. ' + (d.consolidated ? 'Prices are the whole market’s, from Yahoo, which is unofficial.'
       : 'Prices are IEX’s, one exchange, so they can differ a little from the consolidated price.')
     : d ? 'Prices adjusted for splits. Volume in shares.' : '';
-  const sources = feeds.length > 1 ? ' Sources: ' + feeds.map(f => f.name + ' ' + pcAge(f.age)).join(' · ') + '.' : '';
+  const sources = feeds.length > 1 || (feeds.length && feeds[0].stream) ? ' Sources: ' + feeds.map(f => f.name + (f.stream ? ' stream ' : ' ') + pcAge(f.age)).join(' · ') + '.' : '';
   const differ = d && d.differ ? ' They disagree noticeably right now; the newest is shown.' : '';
   const problems = d && (d.problems || []).length ? ' ' + d.problems.join(' ') : '';
   $('pcNote').textContent = pcx.message ? pcx.message : base + sources + differ + problems;
@@ -222,8 +223,9 @@ if (window.ResizeObserver){
   new ResizeObserver(() => { cancelAnimationFrame(pending); pending = requestAnimationFrame(() => {
     const host = $('pcPlot'); if (host && host.clientWidth && Math.abs(host.clientWidth - (+host.dataset.width || 0)) > 2) pcDraw(false); }); }).observe($('pcPlot'));
 }
-// the page's timer asks here every few seconds: a live chart on show asks again as often as its own answer says (charts.py: every_seconds,
-// quicker with a fast feed than with Tiingo alone), a second short for the timer's slack, while a session is on
+// the page's timer asks here every second: a live chart on show asks again as often as its own answer says (charts.py: every_seconds,
+// once a second while a trade stream feeds it, every few with a fast feed, slower with Tiingo alone), a second short for the timer's
+// slack, while a session is on
 function chartTick(){
   const d = pcx.data;
   if (currentPage !== 'chart' || document.hidden || pcx.busy || pcx.hold || !d || !d.live || !d.every_seconds || DATA.as_of || DATA.demo) return;

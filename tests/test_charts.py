@@ -300,6 +300,26 @@ class DemoChartTests(unittest.TestCase):
         code, out = handler.price_chart({"ticker": "KO", "range": "9Y"})                      # an unknown range is the default
         self.assertEqual(out["chart"]["range"], charts.DEFAULT_RANGE)
 
+    def test_the_server_hands_the_chart_the_trade_streams_unless_env_says_off(self):
+        handler = server.Handler.__new__(server.Handler)
+        handler.folder, handler.demo = tempfile.mkdtemp(), False
+        seen, real_chart, real_keys, real_env = [], charts.chart, feeds.keys, os.environ.get("LIVE_STREAM")
+        charts.chart = lambda folder, ticker, range_, **kw: (seen.append(kw) or {"ticker": ticker})
+        feeds.keys = lambda environ=None: {feeds.FINNHUB: "k"}
+        try:
+            os.environ.pop("LIVE_STREAM", None)
+            self.assertTrue(handler.price_chart({"ticker": "KO"})[1]["ok"])
+            self.assertIs(seen[-1]["live"], stream.STREAMS)
+            self.assertEqual(seen[-1]["extra"], {feeds.FINNHUB: "k"})
+            os.environ["LIVE_STREAM"] = "0"
+            handler.price_chart({"ticker": "KO"})
+            self.assertIsNone(seen[-1]["live"])
+        finally:
+            charts.chart, feeds.keys = real_chart, real_keys
+            os.environ.pop("LIVE_STREAM", None)
+            if real_env is not None:
+                os.environ["LIVE_STREAM"] = real_env
+
 
 class ChartPageTests(unittest.TestCase):
     def head(self):
@@ -353,7 +373,7 @@ class ChartPageTests(unittest.TestCase):
         self.assertEqual(page_source().count("setInterval("), 1)
         self.assertEqual(build_desk.compute(generate_demo_data.generate(date(2026, 10, 5)), today=date(2026, 10, 5))["chart"],
                          {"ranges": list(charts.RANGES), "default": charts.DEFAULT_RANGE})
-        self.assertRegex(page_source(), r"\}, 5000\);")                                  # the one timer ticks every five seconds
+        self.assertRegex(page_source(), r"\}, 1000\);")                                  # the one timer ticks every second
 
     def test_the_page_reaches_only_the_desks_own_chart_endpoint(self):
         code = read(os.path.join(ROOT, "page", "chart.js"))

@@ -13,8 +13,10 @@ bars. All of it is IEX's, one exchange, so it can differ a little from the conso
 Reads only. Tiingo's requests are counted so that this and the company update share its free
 allowance (50 an hour, 1,000 a day): a chart may use CHART_PER_HOUR of them, and `prices.update` is
 told how many it has used. The other feeds are counted by the minute (ALLOWANCE). A page that has a
-live chart open asks again every FAST_SECONDS when a fast feed answered, else every SLOW_SECONDS,
-while a session is on.
+live chart open asks again every STREAM_SECONDS while a trade stream is feeding it (stream.py: Alpaca's
+and Finnhub's, every trade as it happens), every FAST_SECONDS when a fast feed answered, else every
+SLOW_SECONDS, while a session is on. A streamed trade is the price, and joins the candle it falls in
+(`fold_ticks`); a feed whose stream is quiet is asked as before.
 
 Usage: python3 charts.py NVDA [1D|5D|1M|6M|1Y|5Y]
 """
@@ -22,7 +24,7 @@ import json, os, random, sys, threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from env_config import atomic_write_json, moment, NO_TIINGO_KEY
-import feeds, news, prices, summarise
+import feeds, news, prices, stream, summarise
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHARTS_FILE = "charts.json"           # {"asked": [Tiingo requests of the last day], "feeds": {feed: [its requests]}}
@@ -40,6 +42,7 @@ DEFAULT_RANGE = "6M"
 CHART_PER_HOUR, CHART_PER_DAY = 24, 300
 ALLOWANCE = {feeds.FINNHUB: (20, 60), feeds.ALPACA: (60, 60), feeds.YAHOO: (12, 60)}   # requests, per this many seconds
 FAST_SECONDS, SLOW_SECONDS = 5, 180   # a live chart asks again this often: with a fast feed, and with Tiingo alone
+STREAM_SECONDS = 1                    # ... and while a trade stream is feeding it: the trades are already here
 # How long an answer is kept. A fast feed's is shorter than the refresh, so every refresh sees a new price;
 # Yahoo's is longer, being unofficial and asked gently. test_feeds checks that the refresh and these keep every
 # feed within its allowance.
@@ -316,6 +319,39 @@ def fold(bars, quote, minutes):
     return bars + [(start, last[4], max(last[4], price), min(last[4], price), price, 0.0)]
 
 
+def fold_ticks(bars, ticks, minutes, count_volume):
+    """The bars with every streamed trade put in, oldest first. A trade inside the last bar moves its
+    close, high and low (its volume is the feed's own, which already holds it); one past the last bar
+    makes the bars the stream began, each opening at its first trade. `count_volume` is true only when the
+    trades are of the same exchange as the bars (IEX's), so their sizes add up to the bar's volume. An odd
+    lot (`odd`) adds its volume and takes no price, as in Alpaca's own bars, and opens no bar. Only the
+    regular session of the last bar's own day is folded."""
+    if not bars or not ticks:
+        return bars
+    bars, width = list(bars), timedelta(minutes=minutes)
+    settled = bars[-1][0] + width                  # from here on no bar is the feed's: the stream's are
+    day = bars[-1][0].astimezone(prices.MARKET_TZ).date()
+    for t in sorted(ticks, key=lambda t: t["at"]):
+        when = moment(t["at"])
+        there = when.astimezone(prices.MARKET_TZ) if when else None
+        last = bars[-1]
+        if (not there or there.date() != day or not OPEN <= there.strftime("%H:%M") < CLOSE or when < last[0]):
+            continue
+        price, size = t["price"], (t.get("size") or 0) if count_volume else 0
+        if when < last[0] + width:
+            own = last[0] >= settled
+            if t.get("odd"):
+                bars[-1] = last[:5] + (last[5] + (size if own else 0),)
+            else:
+                bars[-1] = (last[0], last[1], max(last[2], price), min(last[3], price), price, last[5] + (size if own else 0))
+        elif t.get("odd"):
+            continue
+        else:
+            start = last[0] + width * int((when - last[0]) / width)
+            bars.append((start, price, price, price, price, float(size)))
+    return bars
+
+
 def header(bars, quote, intraday_bars, now, bars_feed=None):
     """The price shown above the chart, and whether it is live. A price newer than the last daily
     close (a later day's, or the same day's after 16:00) is shown, measured from that close; else the
@@ -379,10 +415,26 @@ def _run(tasks):
     return done
 
 
-def chart(folder, ticker, range_, key=None, opener=None, now=None, extra=None):
+def streamed(live, ticker, have, now):
+    """What the trade streams hold for this ticker: ({feed: its newest trade as a quote}, {feed: its
+    trades}, [the problems they report]). `live` is a stream.Streams, or None for no streams."""
+    if live is None:
+        return {}, {}, []
+    live.want(ticker, have)
+    quotes, trades = {}, {}
+    for name in stream.PROTOCOLS:
+        if name in have and live.streaming(name):
+            last = live.last(name, ticker, now)
+            if last:
+                quotes[name], trades[name] = last, live.recent(name, ticker, now)
+    return quotes, trades, live.problems()
+
+
+def chart(folder, ticker, range_, key=None, opener=None, now=None, extra=None, live=None):
     """The chart of one ticker over one range: {"bars", "labels", "price", "live", …}. `extra` is
-    feeds.keys(): the other feeds there are keys for, asked side by side with Tiingo. A ChartError says in
-    words why not; a feed that fails is named in the chart's `problems` and the others carry on."""
+    feeds.keys(): the other feeds there are keys for, asked side by side with Tiingo; `live` the trade
+    streams (stream.py), which give the price and the forming candle between requests. A ChartError says
+    in words why not; a feed that fails is named in the chart's `problems` and the others carry on."""
     ticker, range_ = clean_ticker(ticker), range_ if range_ in RANGES else DEFAULT_RANGE
     if not ticker:
         raise ChartError("Type a ticker, like NVDA.")
@@ -391,8 +443,11 @@ def chart(folder, ticker, range_, key=None, opener=None, now=None, extra=None):
     have = extra or {}
     bars = daily(folder, ticker, key, opener, now)
     intraday_range = RANGES[range_][0] == "intraday"
-    tasks = {"quote-" + name: (lambda name=name: fast_quote(folder, name, ticker, have, opener, now))
-             for name in feeds.QUOTES if name in have}
+    pushed, ticks, stream_problems = streamed(live, ticker, have, now)
+    # a feed whose stream gave a trade a moment ago needs no request for its price
+    quiet = [name for name in feeds.QUOTES if name in have
+             and not (name in pushed and (now - moment(pushed[name]["at"])).total_seconds() <= stream.FRESH_SECONDS)]
+    tasks = {"quote-" + name: (lambda name=name: fast_quote(folder, name, ticker, have, opener, now)) for name in quiet}
     if intraday_range and feeds.ALPACA in have:
         tasks["bars-" + feeds.ALPACA] = lambda: alpaca_intraday(folder, ticker, range_, have[feeds.ALPACA], opener, now)
     if feeds.YAHOO in have:
@@ -406,6 +461,7 @@ def chart(folder, ticker, range_, key=None, opener=None, now=None, extra=None):
     yahoo = results.get("yahoo", (None, None))[0] or {}
     if yahoo.get("quote"):
         quotes.append(yahoo["quote"])
+    quotes += list(pushed.values())
     got, bars_feed, minutes = [], None, RANGES[range_][2]
     if intraday_range:
         sessions = RANGES[range_][1]
@@ -420,6 +476,7 @@ def chart(folder, ticker, range_, key=None, opener=None, now=None, extra=None):
             if not got:
                 raise ChartError(f"Tiingo has no intraday prices for {ticker} yet.")
     fast = bool(quotes) or bars_feed in (feeds.ALPACA, feeds.YAHOO)
+    pushing = bool(pushed)
     if not quotes and not intraday_range:      # a daily range's price, when no fast feed gave one: Tiingo's latest
         try:
             tiingo = latest(folder, ticker, key, opener, now)
@@ -428,11 +485,19 @@ def chart(folder, ticker, range_, key=None, opener=None, now=None, extra=None):
             problems.append(str(e))
     best, differ = feeds.combine(quotes, now)
     if intraday_range:
+        # Alpaca's trades are IEX's, as its bars and Tiingo's are; Finnhub's are the market's, so they give a price only
+        tick_feed = feeds.ALPACA if ticks.get(feeds.ALPACA) else feeds.FINNHUB if ticks.get(feeds.FINNHUB) else None
+        if tick_feed:
+            got = fold_ticks(got, ticks[tick_feed], minutes,
+                             tick_feed == feeds.ALPACA and bars_feed in (feeds.ALPACA, feeds.TIINGO))
         got = fold(got, best, minutes)
     out = build(range_, bars, got, best, now, bars_feed, minutes)
-    out.update({"ticker": ticker, "every_seconds": FAST_SECONDS if fast else SLOW_SECONDS, "differ": differ,
-                "problems": problems,
-                "feeds": [{"name": q["feed"], "price": round(q["price"], 4),
+    out["price"]["stream"] = bool(best and best.get("stream"))
+    out.update({"ticker": ticker,
+                "every_seconds": STREAM_SECONDS if pushing else FAST_SECONDS if fast else SLOW_SECONDS,
+                "differ": differ, "streaming": sorted(pushed, key=feeds.ORDER.index),
+                "problems": problems + [p for p in stream_problems if p not in problems],
+                "feeds": [{"name": q["feed"], "price": round(q["price"], 4), "stream": bool(q.get("stream")),
                            "age": max(0, int((now - moment(q["at"])).total_seconds()))}
                           for q in sorted(quotes, key=lambda q: feeds.ORDER.index(q["feed"]))]})
     with _lock:

@@ -27,10 +27,10 @@ class NetworkTests(unittest.TestCase):
         doc = read(os.path.join(ROOT, "docs", "NETWORK.md"))
         found = {}
         for path in source_files():
-            for host in re.findall(r"https?://([A-Za-z0-9][A-Za-z0-9.-]*)", read(path)):
+            for host in re.findall(r"(?:https?|wss?)://([A-Za-z0-9][A-Za-z0-9.-]*)", read(path)):
                 if host not in NOT_A_DESTINATION:
                     found.setdefault(host, os.path.relpath(path, ROOT))
-        self.assertTrue({"data.sec.gov", "api.tiingo.com", "api.alpaca.markets"} <= set(found), found)
+        self.assertTrue({"data.sec.gov", "api.tiingo.com", "api.alpaca.markets", "stream.data.alpaca.markets", "ws.finnhub.io"} <= set(found), found)
         for host, where in sorted(found.items()):
             self.assertIn("`" + host + "`", doc, f"{host} (in {where}) is not listed in docs/NETWORK.md")
 
@@ -54,8 +54,14 @@ class NetworkTests(unittest.TestCase):
             self.assertIsNone(re.search(pattern, page), pattern)
         self.assertEqual(page.count("data:font/woff2;base64,"), 2)      # its own two typefaces, nothing fetched
 
-    def test_the_code_reaches_the_network_only_through_urllib(self):
-        """One way to read: nothing to look for but urllib, and no library that could phone home."""
+    def test_the_code_reaches_the_network_only_through_urllib_and_the_one_stream_client(self):
+        """Two ways to read: urllib, and wsclient.py's own socket for the live trade streams, the only module that opens
+        one. No library that could phone home."""
+        for path in source_files():
+            if path.endswith(".py") and os.path.basename(path) != "wsclient.py":
+                code = read(path)
+                self.assertNotIn("create_connection", code, os.path.relpath(path, ROOT))
+                self.assertNotIn("wrap_socket", code, os.path.relpath(path, ROOT))
         never = re.compile(r"^\s*(?:import|from)\s+(?:requests|httpx|aiohttp|urllib3|websockets?|smtplib|ftplib|telnetlib)\b", re.M)
         for path in source_files():
             if path.endswith(".py"):

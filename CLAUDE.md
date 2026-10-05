@@ -322,10 +322,22 @@ Seven tabs with hash routing (`TABS` in the template), each one subject:
   `prices.update`'s `also_asked`), side by side; the newest price by its own trade time is shown and says whose it is
   (`price.via`), a feed that fails is named in the chart's `problems` and the others carry on, two feeds more than
   `feeds.DISAGREE` apart at one moment are said to differ, and the price is folded into the bar it falls in (`charts.fold`). A
-  chart on show, in a session, asks again every `charts.FAST_SECONDS` with a fast feed, else every `SLOW_SECONDS`, from the
-  page's one timer (`chartTick`; it ticks every five seconds and `marketDue` keeps the company data to its half hours),
-  pausing when the tab is hidden or a pointer is on the chart. A key goes in a header, never in an address. Reads only; the
-  demo's bars are made from its own closes.
+  chart on show, in a session, asks again every `charts.STREAM_SECONDS` (one) while a trade stream feeds it, every
+  `charts.FAST_SECONDS` with a fast feed, else every `SLOW_SECONDS`, from the page's one timer (`chartTick`; it ticks every
+  second and `marketDue` keeps the company data to its half hours), pausing when the tab is hidden or a pointer is on the chart.
+  A key goes in a header, never in an address. Reads only; the demo's bars are made from its own closes.
+- **Trade streams** (`stream.py`, over `wsclient.py`, a small RFC 6455 client on the standard library, the one module that opens
+  a socket itself): with an Alpaca key pair, or the Finnhub key, Alpaca's IEX trades (`wss://stream.data.alpaca.markets/v2/iex`;
+  the free plan allows one connection and 30 symbols) and Finnhub's (`wss://ws.finnhub.io`; 50 symbols) arrive as they happen. A
+  stream is opened only for what a chart has asked about in the last `stream.IDLE_SECONDS` (at most `WATCH_MOST` tickers, and no
+  connection at all when none), so Alpaca's one free connection is free for any other program on the same key; a broken one is
+  opened again after a growing pause, and a refused key, or the one connection being in use elsewhere, is said in words and not
+  retried for `REFUSED_WAIT`. A streamed trade is the price (`price.stream`), a feed whose stream spoke within
+  `stream.FRESH_SECONDS` is not asked for a quote, and the trades join the candle they fall in (`charts.fold_ticks`): a trade past
+  the last bar makes the bars the stream began, each opening at its first trade, their volume the trades' sizes only where the
+  trades are IEX's like the bars (Alpaca's), a price alone otherwise (Finnhub's); an odd lot (condition `I`) adds volume and takes no price, as Alpaca's own bars do. Nothing is stored. The streams only sign in and
+  subscribe to trades, and send nothing else; `LIVE_STREAM=0` in `.env` turns them off. Finnhub's takes its token in the address it
+  is opened at, as its documentation requires, and no message here carries it.
 - **Ask** is `chat.py`, `POST /chat` and `page/chat.js`, through `summarise.ask`, the one function that holds the key. The
   model is given, per question, the facts the page itself shows for the companies in play (the card's figures, the desk's own
   rating, the week's headlines, what the chart on show shows), and the holdings and followed list only when the user ticks the

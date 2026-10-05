@@ -149,7 +149,7 @@ def ask(url, headers=None, opener=None, clock=time.monotonic):
         return False, f"cannot connect ({str(reason)[:120]})", clock() - started
 
 
-def sources(environ, opener=None, today=None, run=subprocess.run, account=False, iphone=None, folder=HERE):
+def sources(environ, opener=None, today=None, run=subprocess.run, account=False, iphone=None, folder=HERE, streamer=None):
     """Each source asked once. Those without their key are skipped, and say why."""
     today = today or datetime.now(timezone.utc).date()
     rows = []
@@ -182,6 +182,16 @@ def sources(environ, opener=None, today=None, run=subprocess.run, account=False,
               {"User-Agent": feeds.BROWSER})
     else:
         rows.append(("Yahoo (chart data)", "skipped", "YAHOO_CHART is not 1 in .env (optional, unofficial)", None))
+    import stream
+    for feed, label in ((feeds.ALPACA, "Alpaca (live trades)"), (feeds.FINNHUB, "Finnhub (live trades)")):
+        have = feeds.keys(environ)
+        if feed not in have:
+            rows.append((label, "skipped", f"no {feed} key in .env (optional)", None))
+        elif not feeds.stream_enabled(environ):
+            rows.append((label, "skipped", "LIVE_STREAM=0 in .env", None))
+        else:
+            ok, what, seconds = (streamer or stream.check)(feed, have[feed])
+            rows.append((label, "ok" if ok else "FAILED", what, seconds))
     check("Finnhub (results, news)", "FINNHUB_API_KEY",
           f"https://finnhub.io/api/v1/quote?symbol=SPY&token={environ.get('FINNHUB_API_KEY', '').strip()}")
     import headlines
@@ -437,7 +447,7 @@ def account_source(folder):
 
 
 def report(folder=HERE, environ=None, now=None, offline=False, account=False, opener=None, run=subprocess.run,
-           rated=None, iphone=None):
+           rated=None, iphone=None, streamer=None):
     environ = os.environ if environ is None else environ
     now = now or datetime.now(timezone.utc)
     out = [f"Trading Desk health check, {now.strftime('%d %b %Y %H:%M')} UTC",
@@ -455,7 +465,7 @@ def report(folder=HERE, environ=None, now=None, offline=False, account=False, op
         section("Sources", [("", "not asked (--offline)")])
     else:
         rows = sources(environ, opener=opener, today=now.date(), run=run, account=account, iphone=iphone,
-                       folder=folder)
+                       folder=folder, streamer=streamer)
         section("Sources (each asked once)",
                 [(label, f"{state:<7} {what}" + (f" · {seconds:.1f} s" if seconds is not None and state != "skipped"
                                                  else "")) for label, state, what, seconds in rows])

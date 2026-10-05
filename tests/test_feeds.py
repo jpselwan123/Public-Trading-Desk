@@ -78,6 +78,11 @@ class FeedTests(unittest.TestCase):
         self.assertEqual(feeds.keys(EVERY_KEY and {"FINNHUB_API_KEY": "f", "ALPACA_API_KEY": "i", "ALPACA_API_SECRET": "s"}),
                          {feeds.FINNHUB: "f", feeds.ALPACA: ("i", "s")})
 
+    def test_the_streams_are_on_unless_env_says_off(self):
+        self.assertTrue(feeds.stream_enabled({}))
+        self.assertTrue(feeds.stream_enabled({"LIVE_STREAM": "1"}))
+        self.assertFalse(feeds.stream_enabled({"LIVE_STREAM": " 0 "}))
+
     def test_finnhubs_quote_is_a_price_and_a_moment_and_an_unknown_symbol_is_none(self):
         market = Market(finnhub=finnhub_at("2026-10-05T14:59:30Z", 131.25))
         got = feeds.finnhub_quote("brk-b", FINNHUB_KEY, market)
@@ -164,6 +169,34 @@ class FoldTests(unittest.TestCase):
             self.assertEqual(charts.fold(self.bars(), quote(stale, 140.0), 1), self.bars(), stale)
         self.assertEqual(charts.fold([], quote("2026-10-05T14:59:30+00:00", 1.0), 1), [])
         self.assertEqual(charts.fold(self.bars(), None, 1), self.bars())
+
+    def test_streamed_trades_move_the_last_candle_and_make_the_ones_after_it(self):
+        tick = lambda at, price, size=100: {"ticker": "NVDA", "price": price, "at": at, "size": size}
+        inside = charts.fold_ticks(self.bars(), [tick("2026-10-05T14:58:20+00:00", 131.0), tick("2026-10-05T14:58:40+00:00", 130.1)], 1, True)
+        self.assertEqual([round(x, 2) for x in inside[-1][1:]], [130.4, 131.0, 130.1, 130.1, 600.0])      # high, low and close move; the feed's volume stands
+        after = charts.fold_ticks(self.bars(), [tick("2026-10-05T15:00:05+00:00", 130.9, 50), tick("2026-10-05T15:00:30+00:00", 131.1, 70),
+                                                tick("2026-10-05T15:01:10+00:00", 131.0, 30)], 1, True)
+        self.assertEqual([(b[0].strftime("%H:%M"), b[1], b[2], b[3], b[4], b[5]) for b in after[2:]],
+                         [("15:00", 130.9, 131.1, 130.9, 131.1, 120.0), ("15:01", 131.0, 131.0, 131.0, 131.0, 30.0)])     # each opens at its first trade; sizes add up
+        nobody = charts.fold_ticks(self.bars(), [tick("2026-10-05T15:00:05+00:00", 130.9, 50)], 1, False)
+        self.assertEqual(nobody[-1][5], 0.0)                                                          # another exchange's sizes are not this feed's volume
+        self.assertEqual(nobody[-1][4], 130.9)
+        both = charts.fold_ticks(self.bars(), [tick("2026-10-05T15:00:05+00:00", 130.9, 50), tick("2026-10-05T15:00:40+00:00", 130.8, 5)], 1, True)
+        self.assertEqual((both[-1][5], both[-1][3]), (55.0, 130.8))                                   # a bar the stream began keeps counting
+        self.assertEqual(charts.fold_ticks(self.bars(), [tick("2026-10-05T15:00:05+00:00", 130.9, 50)], 1, True),
+                         charts.fold_ticks(self.bars(), [tick("2026-10-05T15:00:05+00:00", 130.9, 50)], 1, True))     # the same bars each time it is asked
+        # a trade that is not of the regular session of the bars' own day, or is older than the last bar, is not folded
+        for stray in ("2026-10-05T11:30:00+00:00", "2026-10-05T20:30:00+00:00", "2026-10-06T14:00:00+00:00", "2026-10-05T14:50:00+00:00", "nonsense"):
+            self.assertEqual(charts.fold_ticks(self.bars(), [tick(stray, 140.0)], 1, True), self.bars(), stray)
+        self.assertEqual(charts.fold_ticks([], [tick("2026-10-05T15:00:05+00:00", 1.0)], 1, True), [])
+        self.assertEqual(charts.fold_ticks(self.bars(), [], 1, True), self.bars())
+        odd = lambda at, price, size: dict(tick(at, price, size), odd=True)
+        quiet = charts.fold_ticks(self.bars(), [odd("2026-10-05T14:58:20+00:00", 140.0, 7), odd("2026-10-05T15:00:20+00:00", 140.0, 7)], 1, True)
+        self.assertEqual(quiet, self.bars())                                                          # an odd lot moves no price, opens no bar, adds nothing to the feed's volume
+        mixed = charts.fold_ticks(self.bars(), [tick("2026-10-05T15:00:05+00:00", 130.9, 50), odd("2026-10-05T15:00:10+00:00", 99.0, 7)], 1, True)
+        self.assertEqual((mixed[-1][3], mixed[-1][4], mixed[-1][5]), (130.9, 130.9, 57.0))            # in the stream's own bar its volume counts, its price never
+        out_of_order = charts.fold_ticks(self.bars(), [tick("2026-10-05T15:00:30+00:00", 131.1), tick("2026-10-05T15:00:05+00:00", 130.9)], 1, True)
+        self.assertEqual((out_of_order[-1][1], out_of_order[-1][4]), (130.9, 131.1))                  # oldest first whatever the order given
 
 
 class CombinedChartTests(unittest.TestCase):
@@ -387,13 +420,114 @@ class CadenceTests(unittest.TestCase):
 
     def test_the_page_timer_ticks_at_least_as_fast_as_the_refresh(self):
         tick = int(re.search(r"\}, (\d+)\);", page_source()).group(1))
-        self.assertLessEqual(tick, charts.FAST_SECONDS * 1000)
+        self.assertLessEqual(tick, charts.STREAM_SECONDS * 1000)
+        self.assertLess(charts.STREAM_SECONDS, charts.FAST_SECONDS)
+
+
+class FakeLive:
+    """The trade streams as the chart sees them: what they hold, and what they were asked for."""
+
+    def __init__(self, trades=None, streaming=None, problems=()):
+        self.trades, self.on, self.reports, self.wanted = trades or {}, streaming, list(problems), []
+
+    def want(self, ticker, have):
+        self.wanted.append((ticker, sorted(have)))
+
+    def streaming(self, feed):
+        return feed in (self.trades if self.on is None else self.on)
+
+    def recent(self, feed, ticker, now=None):
+        return list(self.trades.get(feed, []))
+
+    def last(self, feed, ticker, now=None):
+        got = self.recent(feed, ticker)
+        return {"price": got[-1]["price"], "at": got[-1]["at"], "feed": feed, "stream": True} if got else None
+
+    def problems(self):
+        return list(self.reports)
+
+
+def tick(at, price, size=100):
+    return {"ticker": "NVDA", "price": price, "at": at, "size": size}
+
+
+class StreamedChartTests(unittest.TestCase):
+    """A trade stream gives the chart its price and its forming candle between requests."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        charts._cache.clear()
+
+    def chart(self, market, live, range_="1D", extra=EVERY_KEY):
+        return charts.chart(self.folder, "NVDA", range_, key="tiingo-SECRET", opener=market, now=NOW, extra=extra, live=live)
+
+    def bars(self):
+        return [alpaca_bar("2026-10-05T14:57:00Z", 130.0, 130.6, 129.9, 130.4, 500), alpaca_bar("2026-10-05T14:58:00Z", 130.4, 130.8, 130.3, 130.7, 600)]
+
+    def test_a_streamed_trade_is_the_price_and_its_feed_is_not_asked_for_one(self):
+        market = Market(finnhub=finnhub_at("2026-10-05T14:59:40Z", 131.2), trade=trade_at("2026-10-05T14:59:30Z", 131.0), bars=self.bars())
+        live = FakeLive({feeds.ALPACA: [tick("2026-10-05T14:59:58.100+00:00", 131.4, 40), tick("2026-10-05T14:59:58.500+00:00", 131.45, 60)]})
+        got = self.chart(market, live)
+        self.assertEqual((got["price"]["price"], got["price"]["via"], got["price"]["stream"]), (131.45, "Alpaca", True))
+        self.assertEqual((got["every_seconds"], got["streaming"], got["live"]), (charts.STREAM_SECONDS, ["Alpaca"], True))
+        self.assertEqual(market.host("/trades/latest"), [])                                           # the stream already told it
+        self.assertEqual(len(market.host("finnhub.io")), 1)                                           # Finnhub has no stream: asked as before
+        self.assertEqual(live.wanted, [("NVDA", ["Alpaca", "Finnhub"])])
+        self.assertEqual([(f["name"], f["stream"]) for f in got["feeds"]], [("Alpaca", True), ("Finnhub", False)])
+        self.assertEqual(got["bars"][-1][1:], [131.4, 131.45, 131.4, 131.45, 100])                    # the forming candle: both trades, their sizes
+        self.assertEqual(got["bars"][-2][4], 130.7)
+        self.assertEqual((got["differ"], got["problems"]), (False, []))
+
+    def test_a_stream_gone_quiet_is_asked_again_by_post_and_the_newer_price_wins(self):
+        market = Market(trade=trade_at("2026-10-05T14:59:58Z", 131.4), bars=self.bars())
+        live = FakeLive({feeds.ALPACA: [tick("2026-10-05T14:59:30+00:00", 131.0)]})              # thirty seconds old
+        got = self.chart(market, live)
+        self.assertEqual(len(market.host("/trades/latest")), 1)
+        self.assertEqual((got["price"]["price"], got["price"]["stream"]), (131.4, False))
+        self.assertEqual(got["every_seconds"], charts.STREAM_SECONDS)                                 # the stream is still the way it is fed
+
+    def test_a_stream_that_is_not_connected_changes_nothing_and_says_what_is_wrong(self):
+        market = Market(trade=trade_at("2026-10-05T14:59:58Z", 131.4), bars=self.bars())
+        live = FakeLive({feeds.ALPACA: [tick("2026-10-05T14:59:59+00:00", 140.0)]}, streaming=[],
+                        problems=["Alpaca's stream did not accept the key"])
+        got = self.chart(market, live)
+        self.assertEqual((got["price"]["price"], got["every_seconds"], got["streaming"]), (131.4, charts.FAST_SECONDS, []))
+        self.assertEqual(got["problems"], ["Alpaca's stream did not accept the key"])
+        charts._cache.clear()
+        plain = self.chart(Market(trade=trade_at("2026-10-05T14:59:58Z", 131.4), bars=self.bars()), None)
+        self.assertEqual((plain["price"]["price"], plain["streaming"], plain["problems"]), (131.4, [], []))
+
+    def test_a_stream_of_the_whole_market_gives_a_price_and_never_a_volume(self):
+        market = Market(tiingo_bars=[{"date": "2026-10-05T14:50:00.000Z", "open": 131, "high": 131.5, "low": 130.9, "close": 131.2, "volume": 5}])
+        live = FakeLive({feeds.FINNHUB: [tick("2026-10-05T14:59:58.250+00:00", 131.5, 900)]})
+        got = self.chart(market, live, extra={feeds.FINNHUB: FINNHUB_KEY})
+        self.assertEqual((got["price"]["price"], got["price"]["via"], got["price"]["stream"]), (131.5, "Finnhub", True))
+        self.assertEqual((got["bars"][-1][4], got["bars"][-1][5]), (131.5, 0))                        # Tiingo's bars are IEX's: the sizes are not
+        self.assertEqual(market.host("finnhub.io"), [])
+
+    def test_a_daily_range_takes_the_streamed_price_too_and_asks_nobody(self):
+        market = Market()
+        live = FakeLive({feeds.ALPACA: [tick("2026-10-05T14:59:58+00:00", 131.45)]})
+        got = self.chart(market, live, "1M")
+        self.assertEqual((got["price"]["price"], got["price"]["via"], got["every_seconds"]), (131.45, "Alpaca", charts.STREAM_SECONDS))
+        self.assertEqual(market.host("/iex/?"), [])
+        self.assertEqual(market.host("/trades/latest"), [])
+
+    def test_the_stream_keeps_every_feed_within_its_allowance_at_a_refresh_a_second(self):
+        # what is asked is kept for CACHE_SECONDS, so a refresh each STREAM_SECONDS asks a feed no more than that allows
+        self.assertEqual(charts.STREAM_SECONDS, 1)
+        for name, kept in ((feeds.FINNHUB, "quote"), (feeds.ALPACA, "quote")):
+            limit, seconds = charts.ALLOWANCE[name]
+            self.assertLessEqual(seconds / charts.CACHE_SECONDS[kept], limit, name)
+        limit, seconds = charts.ALLOWANCE[feeds.ALPACA]
+        self.assertLessEqual(seconds / charts.CACHE_SECONDS["quote"] + seconds / charts.CACHE_SECONDS["alpaca_bars"], limit)
+        self.assertLess(stream.FRESH_SECONDS, charts.STALE_MINUTES * 60)
 
 
 class PageFeedsTests(unittest.TestCase):
     def test_the_page_says_whose_price_it_is_how_old_the_others_are_and_when_they_differ(self):
         code = read(os.path.join(ROOT, "page", "chart.js"))
-        for held in ("p.via", "d.feeds", "d.differ", "d.problems", "pcAge(d.every_seconds)"):
+        for held in ("p.via", "p.stream", "d.streaming", "f.stream", "d.feeds", "d.differ", "d.problems", "pcAge(d.every_seconds)"):
             self.assertIn(held, code)
         program = code[code.index("function pcAge("):code.index("function pcNoteDraw(")]
         got = json.loads(run_javascript(program + "\nconsole.log(JSON.stringify([pcAge(4), pcAge(15), pcAge(89), pcAge(90), pcAge(180)]));"))

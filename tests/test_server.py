@@ -966,8 +966,10 @@ class HealthCheckTests(unittest.TestCase):
         git = lambda args, **k: subprocess.CompletedProcess(args, 0, stdout={
             "status": "", "log": "034ce68 2026-09-26", "rev-parse": "main",
             "ls-remote": "abc refs/heads/main"}[args[1]], stderr="")
+        streamed = []
         text = doctor.report(self.folder_with_stores(), environ=environ, now=self.NOW, opener=opener, run=git,
-                             rated=self.rated(), iphone=False)
+                             rated=self.rated(), iphone=False,
+                             streamer=lambda feed, key: (streamed.append((feed, key)) or (False, "the key was refused (HTTP 401)", 0.2)))
         for secret in ("SECRET", "owner@example.com"):
             self.assertNotIn(secret, text)
         for line in ("version      034ce68 2026-09-26 on main, no local edits",
@@ -976,6 +978,8 @@ class HealthCheckTests(unittest.TestCase):
                      "SEC EDGAR                ok      ok",
                      "Tiingo (prices)          FAILED  the key was refused (HTTP 401)",
                      "Finnhub (results, news)  FAILED  the free limit is used up for now (HTTP 429)",
+                     "Alpaca (live trades)     skipped no Alpaca key in .env (optional)",
+                     "Finnhub (live trades)    FAILED  the key was refused (HTTP 401)",
                      "Google News (FT, press)  ok      ok",
                      "FRED (cash rate)         FAILED  cannot connect (timed out)",
                      "OpenAI (summaries)       skipped no OPENAI_API_KEY in .env",
@@ -1007,6 +1011,7 @@ class HealthCheckTests(unittest.TestCase):
         press = next(url for url, h in asked if "news.google.com" in url)
         self.assertIn("site%3Aft.com", press)                                  # the FT's own search
         self.assertNotIn("owner@example.com", press)
+        self.assertEqual(streamed, [("Finnhub", "finnhub-SECRET-4")])          # asked once, with the key it was given, and nothing of it printed
         self.assertEqual(doctor.scrub("…?token=abcdef123&x", {}), "…?token=[key]&x")
         missing = doctor.report(self.folder_with_stores(), environ={}, now=self.NOW, offline=True,
                                 rated=self.rated(), iphone=True, opener=lambda *a, **k: self.fail("asked offline"))

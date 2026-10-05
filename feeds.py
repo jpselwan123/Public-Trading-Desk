@@ -62,6 +62,15 @@ def keys(environ=None):
     return found
 
 
+def stream_enabled(environ=None):
+    """Whether the trade streams (stream.py) may run: they do whenever a key for one is in .env, unless .env
+    says LIVE_STREAM=0."""
+    if environ is None:
+        load_env(os.path.join(HERE, ".env"))
+        environ = os.environ
+    return str(environ.get("LIVE_STREAM") or "").strip() != "0"
+
+
 def symbol(ticker):
     """Finnhub and Alpaca write a share class with a dot, Tiingo with a dash."""
     return str(ticker).upper().replace("-", ".")
