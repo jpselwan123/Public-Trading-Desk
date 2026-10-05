@@ -34,7 +34,7 @@ from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from env_config import atomic_write_json, load_env, read_for_writing, UnreadableStore, PARTLY, SETUP_STEPS, scrub
 from health import timing   # noqa: F401  (the refresh's "Took …" line; health.py owns it)
-import analysts, asof, brief, broker, build_desk, charts, chat, context, diffs, earnings, fundamentals, headlines, health, looks, news, paper, plans, prices, rating, research, screen, sectors, summarise, t212, thesis, trade_check, universe, value
+import analysts, asof, brief, broker, build_desk, charts, chat, context, diffs, earnings, feeds, fundamentals, headlines, health, looks, news, paper, plans, prices, rating, research, screen, sectors, summarise, t212, thesis, trade_check, universe, value
 
 HOST, PORT = "127.0.0.1", 8935
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -836,8 +836,8 @@ class Handler(BaseHTTPRequestHandler):
                                                              store=store, codes=codes, price=price, split=split)}
 
     def price_chart(self, body):
-        """The chart of one ticker over one range (charts.py). Reads only. The demo's is made from its
-        own closes and reaches no one."""
+        """The chart of one ticker over one range (charts.py), from Tiingo and every other feed there is a key
+        for (feeds.py). Reads only. The demo's is made from its own closes and reaches no one."""
         ticker = charts.clean_ticker(body.get("ticker"))
         if not ticker:
             return 200, {"ok": False, "message": "Type a ticker, like NVDA."}
@@ -846,7 +846,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.demo:
                 made = charts.demo_chart(prices.load(self.prices_file()), ticker, range_)
             else:
-                made = charts.chart(self.folder, ticker, range_)
+                made = charts.chart(self.folder, ticker, range_, extra=feeds.keys())
         except charts.ChartError as e:
             return 200, {"ok": False, "message": str(e)}
         return 200, {"ok": True, "chart": made}

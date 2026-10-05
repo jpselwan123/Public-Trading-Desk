@@ -68,15 +68,21 @@ function pcHeadDraw(){
   host.innerHTML = '<div class="pc-name"><b>' + esc(d.ticker) + '</b>' + esc(pcName(d.ticker)) + '</div>' +
     '<div class="pc-price"><span class="big">' + esc(pricePer(p.price, d.currency)) + '</span>' +
     (p.change == null ? '' : '<span class="pc-chg">' + pct1(p.change, true) + (p.at ? ' today' : ' on ' + esc(fmtDay(p.close_day))) + '</span>') + '</div>' +
-    '<div class="pc-sub">' + when + (d.live ? ' · updates every ' + esc(String(d.every_minutes)) + ' min' : '') + (d.demo ? ' · demo prices' : '') + '</div>';
+    '<div class="pc-sub">' + when + (p.via ? ' · via ' + esc(p.via) : '') + (d.live && d.every_seconds ? ' · updates every ' + pcAge(d.every_seconds) : '') +
+    (d.demo ? ' · demo prices' : '') + '</div>';
 }
+// a length of time as it is read: seconds under a minute and a half, else minutes
+function pcAge(seconds){ return seconds < 90 ? Math.round(seconds) + ' s' : Math.round(seconds / 60) + ' min'; }
 
 function pcNoteDraw(forcedLine){
-  const d = pcx.data;
-  $('pcNote').textContent = pcx.message ? pcx.message
-    : forcedLine ? 'Too many days for candles: drawn as a line.'
+  const d = pcx.data, feeds = d && d.feeds || [];
+  const base = forcedLine ? 'Too many days for candles: drawn as a line.'
     : d && d.kind === 'intraday' ? 'New York time, regular session. Prices are IEX’s, one exchange, so they can differ a little from the consolidated price.'
     : d ? 'Prices adjusted for splits. Volume in shares.' : '';
+  const sources = feeds.length > 1 ? ' Sources: ' + feeds.map(f => f.name + ' ' + pcAge(f.age)).join(' · ') + '.' : '';
+  const differ = d && d.differ ? ' They disagree noticeably right now; the newest is shown.' : '';
+  const problems = d && (d.problems || []).length ? ' ' + d.problems.join(' ') : '';
+  $('pcNote').textContent = pcx.message ? pcx.message : base + sources + differ + problems;
 }
 
 async function pcLoad(silent){
@@ -215,9 +221,10 @@ if (window.ResizeObserver){
   new ResizeObserver(() => { cancelAnimationFrame(pending); pending = requestAnimationFrame(() => {
     const host = $('pcPlot'); if (host && host.clientWidth && Math.abs(host.clientWidth - (+host.dataset.width || 0)) > 2) pcDraw(false); }); }).observe($('pcPlot'));
 }
-// the page's timer asks here once a minute: a live chart on show asks again every DATA.chart.every_minutes, while a session is on
+// the page's timer asks here every few seconds: a live chart on show asks again as often as its own answer says (charts.py: every_seconds,
+// quicker with a fast feed than with Tiingo alone), a second short for the timer's slack, while a session is on
 function chartTick(){
-  const every = (DATA.chart || {}).every_minutes, d = pcx.data;
-  if (currentPage !== 'chart' || document.hidden || pcx.busy || pcx.hold || !d || !d.live || !every || DATA.as_of || DATA.demo) return;
-  if (Date.now() - pcx.at >= every * 60000 - 5000) pcLoad(true);
+  const d = pcx.data;
+  if (currentPage !== 'chart' || document.hidden || pcx.busy || pcx.hold || !d || !d.live || !d.every_seconds || DATA.as_of || DATA.demo) return;
+  if (Date.now() - pcx.at >= d.every_seconds * 1000 - 1000) pcLoad(true);
 }

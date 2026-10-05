@@ -8,7 +8,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import prices as prices_module  # noqa: E402
-import analysts, asof, t212, backtest, brief, bridge, build_desk, charts, chat, context, diffs, doctor, earnings, env_config, forecasts, fundamentals, habits, headlines, health, looks, news, plans, paper, phone, prices, rating, research, scores, screen, sectors, server, summarise, thesis, trade_check, uncertainty, universe, value, generate_demo_data  # noqa: E402
+import analysts, asof, t212, backtest, brief, bridge, build_desk, charts, chat, context, diffs, doctor, earnings, env_config, feeds, forecasts, fundamentals, habits, headlines, health, looks, news, plans, paper, phone, prices, rating, research, scores, screen, sectors, server, summarise, thesis, trade_check, uncertainty, universe, value, generate_demo_data  # noqa: E402
 import phone_bundle  # noqa: E402
 
 

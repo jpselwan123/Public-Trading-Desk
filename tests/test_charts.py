@@ -111,7 +111,7 @@ class HeaderTests(unittest.TestCase):
         head, live = charts.header(self.BARS, quote, [], self.at("2026-10-05T15:00:00"))
         self.assertEqual((head["price"], head["session"], live), (121.0, "Regular session", True))
         self.assertAlmostEqual(head["change"], 0.10)                                         # 121 against 110
-        self.assertEqual(head["at_label"], "10:55 New York")
+        self.assertEqual(head["at_label"], "10:55:00 New York")
         _, live = charts.header(self.BARS, quote, [], self.at("2026-10-05T15:30:00"))        # 35 minutes on: a halt or a holiday
         self.assertFalse(live)
 
@@ -148,12 +148,12 @@ class ChartTests(unittest.TestCase):
         self.assertEqual(got["bars"][-1][0], "2026-10-02")
         self.assertEqual(got["price"]["price"], 130.5)
         self.assertTrue(got["live"])
-        self.assertEqual(len(charts.RANGES) and got["every_minutes"], charts.EVERY_MINUTES)
+        self.assertEqual(got["every_seconds"], charts.SLOW_SECONDS)                           # Tiingo alone: every three minutes
         again = charts.chart(self.folder, "NVDA", "6M", key="k", opener=t, now=NOW + timedelta(seconds=20))
         self.assertEqual(len(t.asked), 2)                                                    # the bars and the price are kept
         self.assertGreaterEqual(len(again["bars"]), len(got["bars"]))
-        charts.chart(self.folder, "NVDA", "1M", key="k", opener=t, now=NOW + timedelta(seconds=90))
-        self.assertEqual(len(t.asked), 3)                                                    # a minute and a half on: the price again
+        charts.chart(self.folder, "NVDA", "1M", key="k", opener=t, now=NOW + timedelta(seconds=130))
+        self.assertEqual(len(t.asked), 3)                                                    # two minutes on: the price again
         self.assertIn("/iex/?", t.asked[2])
 
     def test_a_range_is_cut_from_the_last_bar(self):
@@ -346,13 +346,14 @@ class ChartPageTests(unittest.TestCase):
         tick = template_function("chartTick", page_source())
         for held in ("currentPage !== 'chart'", "document.hidden", "pcx.busy", "pcx.hold", "!d.live", "DATA.as_of", "DATA.demo"):
             self.assertIn(held, tick)
-        self.assertIn("DATA.chart", tick)                                               # the minutes are charts.py's
-        self.assertNotRegex(tick.replace("60000", "").replace("5000", ""), r"\b\d{2,}\b")   # and the page guesses none (60000: a minute; 5000: the timer's slack)
+        self.assertIn("d.every_seconds", tick)                                          # how often is charts.py's, with each chart
+        self.assertNotRegex(tick.replace("1000", ""), r"\b\d{2,}\b")                   # and the page guesses none (1000: a second in milliseconds, and a second's slack)
         timer = [l for l in page_source().splitlines() if "setInterval(" in l][0]
         self.assertIn("chartTick()", timer)
         self.assertEqual(page_source().count("setInterval("), 1)
         self.assertEqual(build_desk.compute(generate_demo_data.generate(date(2026, 10, 5)), today=date(2026, 10, 5))["chart"],
-                         {"ranges": list(charts.RANGES), "default": charts.DEFAULT_RANGE, "every_minutes": charts.EVERY_MINUTES})
+                         {"ranges": list(charts.RANGES), "default": charts.DEFAULT_RANGE})
+        self.assertRegex(page_source(), r"\}, 5000\);")                                  # the one timer ticks every five seconds
 
     def test_the_page_reaches_only_the_desks_own_chart_endpoint(self):
         code = read(os.path.join(ROOT, "page", "chart.js"))

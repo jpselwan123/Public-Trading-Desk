@@ -312,10 +312,17 @@ Seven tabs with hash routing (`TABS` in the template), each one subject:
   candles are Tiingo's end-of-day bars restated for splits and not for dividends (the price that was quoted); the day's bars
   are IEX's, regular session, in New York's clock; the price above is IEX's latest, so it can differ a little from the
   consolidated one. An up candle is hollow and a down one filled: colour says what a number is, never whether it is good.
-  A chart on show, in a session, asks again every `charts.EVERY_MINUTES` from the page's one timer (`chartTick`, still one
-  `setInterval`), pausing when the tab is hidden or a pointer is on the chart; its requests are charged to Tiingo's 50 an
-  hour together with the company update (`charts.CHART_PER_HOUR`, `prices.update`'s `also_asked`). Reads only; the demo's
-  bars are made from its own closes.
+  "Live" is the newest of every free feed there is a key for (`feeds.py`): Tiingo always; Finnhub's quote with the key already
+  used for results and news; Alpaca's IEX latest trade and bars down to the minute with `ALPACA_API_KEY` and
+  `ALPACA_API_SECRET` (a free account's pair, read only; the consolidated feed is paid and never asked). Each is asked as often as
+  its own allowance lets it (`charts.ALLOWANCE` by the minute, `CHART_PER_HOUR` for Tiingo, charged with the company update through
+  `prices.update`'s `also_asked`), side by side; the newest price by its own trade time is shown and says whose it is
+  (`price.via`), a feed that fails is named in the chart's `problems` and the others carry on, two feeds more than
+  `feeds.DISAGREE` apart at one moment are said to differ, and the price is folded into the bar it falls in (`charts.fold`). A
+  chart on show, in a session, asks again every `charts.FAST_SECONDS` with a fast feed, else every `SLOW_SECONDS`, from the
+  page's one timer (`chartTick`; it ticks every five seconds and `marketDue` keeps the company data to its half hours),
+  pausing when the tab is hidden or a pointer is on the chart. A key goes in a header, never in an address. Reads only; the
+  demo's bars are made from its own closes.
 - **Ask** is `chat.py`, `POST /chat` and `page/chat.js`, through `summarise.ask`, the one function that holds the key. The
   model is given, per question, the facts the page itself shows for the companies in play (the card's figures, the desk's own
   rating, the week's headlines, what the chart on show shows), and the holdings and followed list only when the user ticks the

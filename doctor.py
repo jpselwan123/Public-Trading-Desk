@@ -170,6 +170,13 @@ def sources(environ, opener=None, today=None, run=subprocess.run, account=False,
     check("Tiingo (chart bars)", "TIINGO_API_KEY", charts.IEX_URL.format(
         ticker="spy", start=(today - timedelta(days=7)).isoformat(), minutes=5),
           {"Authorization": f"Token {environ.get('TIINGO_API_KEY', '').strip()}"})
+    import feeds
+    if feeds.ALPACA in feeds.keys(environ):
+        check("Alpaca (chart data)", None, feeds.ALPACA_TRADE.format(symbol="SPY"),
+              {"APCA-API-KEY-ID": environ.get("ALPACA_API_KEY", "").strip(),
+               "APCA-API-SECRET-KEY": environ.get("ALPACA_API_SECRET", "").strip()})
+    else:
+        rows.append(("Alpaca (chart data)", "skipped", "no Alpaca key pair in .env (optional)", None))
     check("Finnhub (results, news)", "FINNHUB_API_KEY",
           f"https://finnhub.io/api/v1/quote?symbol=SPY&token={environ.get('FINNHUB_API_KEY', '').strip()}")
     import headlines

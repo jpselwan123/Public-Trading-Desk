@@ -1,39 +1,46 @@
 """A company's price chart: a line or candles, for any US share or fund, from Tiingo (the key
-the desk already uses for its prices).
+the desk already uses for its prices), and from every other free feed that has a key in .env.
 
 Daily candles are Tiingo's end-of-day prices, in the shares of today (a split is restated,
 a dividend is not: the candle shows the price that was quoted). The day's bars, and the last
-five days', are IEX's through Tiingo, regular session only, in New York's clock. The price
-above the chart is IEX's latest, pre- and post-market included, so it can differ a little
-from the consolidated price: IEX is one exchange.
+five days', are IEX's: Alpaca's, down to the minute, when its key is in .env (200 requests a
+minute on the free plan), else Tiingo's. The price above the chart is the newest of what each
+feed has (feeds.py: Alpaca's latest trade, Finnhub's quote, Tiingo's latest), each asked as often
+as its own allowance lets it; it says which feed gave it, and says so when two disagree. That
+price is also folded into the bar it falls in, so the last candle moves between two requests for
+bars. All of it is IEX's, one exchange, so it can differ a little from the consolidated price.
 
-Reads only. Nothing is stored but a count of the requests made, so that this and the company
-update share Tiingo's free allowance (50 requests an hour, 1,000 a day): a chart may use
-CHART_PER_HOUR of them, and `prices.update` is told how many it has used. A page that has
-a live chart open asks again every EVERY_MINUTES, while a session is on.
+Reads only. Tiingo's requests are counted so that this and the company update share its free
+allowance (50 an hour, 1,000 a day): a chart may use CHART_PER_HOUR of them, and `prices.update` is
+told how many it has used. The other feeds are counted by the minute (ALLOWANCE). A page that has a
+live chart open asks again every FAST_SECONDS when a fast feed answered, else every SLOW_SECONDS,
+while a session is on.
 
 Usage: python3 charts.py NVDA [1D|5D|1M|6M|1Y|5Y]
 """
 import json, os, random, sys, threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from env_config import atomic_write_json, moment, NO_TIINGO_KEY
-import news, prices, summarise
+import feeds, news, prices, summarise
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CHARTS_FILE = "charts.json"           # {"asked": [when each request of the last day was made]}
+CHARTS_FILE = "charts.json"           # {"asked": [Tiingo requests of the last day], "feeds": {feed: [its requests]}}
 IEX_URL = ("https://api.tiingo.com/iex/{ticker}/prices?startDate={start}&resampleFreq={minutes}min"
            "&columns=open,high,low,close,volume")
 DAILY_YEARS = 5
-# name: (kind, how far back: days of daily bars, or sessions of intraday ones, bar minutes)
+# name: (kind, how far back: days of daily bars, or sessions of intraday ones, Tiingo's bar minutes)
 RANGES = {"1D": ("intraday", 1, 5), "5D": ("intraday", 5, 15), "1M": ("daily", 31, None),
           "6M": ("daily", 183, None), "1Y": ("daily", 366, None), "5Y": ("daily", 1830, None)}
+ALPACA_MINUTES = {"1D": 1, "5D": 5}   # Alpaca's bars are finer, its allowance being larger
 DEFAULT_RANGE = "6M"
-# The desk's choice, within Tiingo's free allowance of 50 an hour and 1,000 a day: a chart may use
-# this many of them, and the company update leaves them to it. An open live chart asks every
-# EVERY_MINUTES (20 an hour at 3), a view of a new company two.
+# The desk's choices. Tiingo's free allowance is 50 requests an hour and 1,000 a day, shared with the
+# company update; a chart may use this many of them. Another feed is limited by the minute: Finnhub's
+# free plan allows 60 and Alpaca's 200, and the charts take a third and a third of those.
 CHART_PER_HOUR, CHART_PER_DAY = 24, 300
-EVERY_MINUTES = 3
-CACHE_SECONDS = {"daily": 6 * 3600, "intraday": 120, "latest": 60}
+ALLOWANCE = {feeds.FINNHUB: (20, 60), feeds.ALPACA: (60, 60)}        # requests, per this many seconds
+FAST_SECONDS, SLOW_SECONDS = 15, 180  # a live chart asks again this often: with a fast feed, and with Tiingo alone
+CACHE_SECONDS = {"daily": 6 * 3600, "intraday": 120, "latest": 120, "quote": 8, "alpaca_bars": 10}
 LIVE_SESSIONS = ("Pre-market", "Regular session", "After hours")
 STALE_MINUTES = 20                    # a session on the clock with nothing newer than this is a holiday or a halt
 OPEN, CLOSE = "09:30", prices.CLOSE   # the regular session, New York's clock
@@ -80,29 +87,50 @@ def _kept(what, ticker, range_, seconds, make, now):
 
 
 # ---- the shared allowance ---------------------------------------------------------------------
-def asked(folder, now=None):
-    """When each request this chart made in the last day was made (ISO times)."""
-    now = now or datetime.now(timezone.utc)
+def _stored(folder):
     try:
         with open(os.path.join(folder, CHARTS_FILE)) as f:
-            kept = json.load(f).get("asked")
-    except (OSError, ValueError, AttributeError):
-        kept = None
-    day_ago = (now - timedelta(days=1)).isoformat()
-    return [a for a in kept or [] if isinstance(a, str) and a > day_ago]
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _stamps(value, now, seconds):
+    cut = (now - timedelta(seconds=seconds)).isoformat()
+    return [a for a in value if isinstance(a, str) and a > cut] if isinstance(value, list) else []
+
+
+def asked(folder, now=None):
+    """When each Tiingo request the charts made in the last day was made (ISO times)."""
+    now = now or datetime.now(timezone.utc)
+    return _stamps(_stored(folder).get("asked"), now, 86400)
 
 
 def room(folder, now=None):
     now = now or datetime.now(timezone.utc)
-    kept, hour_ago = asked(folder, now), (now - timedelta(hours=1)).isoformat()
-    return sum(1 for a in kept if a > hour_ago) < CHART_PER_HOUR and len(kept) < CHART_PER_DAY
+    kept = asked(folder, now)
+    return sum(1 for a in _stamps(kept, now, 3600)) < CHART_PER_HOUR and len(kept) < CHART_PER_DAY
 
 
-def _spend(folder, now):
+def feed_room(folder, name, now):
+    """Whether the charts may ask another feed again: its allowance by the minute is not spent."""
+    limit, seconds = ALLOWANCE[name]
+    return len(_stamps(((_stored(folder).get("feeds") or {}).get(name)), now, seconds)) < limit
+
+
+def _spend(folder, now, feed=None):
     with _lock:
-        kept = asked(folder, now) + [now.isoformat(timespec="seconds")]
+        data = _stored(folder)
+        stamp = now.isoformat(timespec="seconds")
+        if feed:
+            by = data.get("feeds") if isinstance(data.get("feeds"), dict) else {}
+            by[feed] = _stamps(by.get(feed), now, 86400) + [stamp]
+            data["feeds"] = by
+        else:
+            data["asked"] = _stamps(data.get("asked"), now, 86400) + [stamp]
         try:
-            atomic_write_json(os.path.join(folder, CHARTS_FILE), {"asked": kept})
+            atomic_write_json(os.path.join(folder, CHARTS_FILE), data)
         except OSError:
             pass                       # a folder that cannot be written still gets its chart
 
@@ -212,6 +240,7 @@ def label(when, with_day):
 
 # ---- the price above the chart ----------------------------------------------------------------
 def latest(folder, ticker, key, opener, now):
+    """Tiingo's latest price from IEX, {"price", "at", "feed"}, or None."""
     def make():
         rows = _ask(folder, prices.LATEST_URL.format(tickers=_slug(ticker)), key, opener, now)
         for row in rows or []:
@@ -220,74 +249,169 @@ def latest(folder, ticker, key, opener, now):
             price = row.get("tngoLast") if row.get("tngoLast") is not None else row.get("last")
             when = moment(row.get("timestamp"))
             if isinstance(price, (int, float)) and price > 0 and when:
-                return {"price": float(price), "at": when.astimezone(timezone.utc).isoformat(timespec="seconds")}
+                return {"price": float(price), "at": when.astimezone(timezone.utc).isoformat(timespec="seconds"),
+                        "feed": feeds.TIINGO}
         return None
     return _kept("latest", ticker, "", CACHE_SECONDS["latest"], make, now.timestamp())
 
 
-def header(bars, quote, intraday_bars, now):
+def fast_quote(folder, name, ticker, have, opener, now):
+    """One fast feed's quote, kept for a few seconds; None when its allowance by the minute is spent or it
+    knows nothing of the ticker. A FeedError says why it failed."""
+    def make():
+        if not feed_room(folder, name, now):
+            return None
+        _spend(folder, now, name)
+        if name == feeds.FINNHUB:
+            return feeds.finnhub_quote(ticker, have[name], opener)
+        return feeds.alpaca_quote(ticker, have[name], opener)
+    return _kept("quote-" + name, ticker, "", CACHE_SECONDS["quote"], make, now.timestamp())
+
+
+def alpaca_intraday(folder, ticker, range_, pair, opener, now):
+    """The day's (or five days') bars from Alpaca, regular session only, or [] when its allowance is spent."""
+    sessions, minutes = RANGES[range_][1], ALPACA_MINUTES[range_]
+
+    def make():
+        if not feed_room(folder, feeds.ALPACA, now):
+            return []
+        _spend(folder, now, feeds.ALPACA)
+        start = (now.date() - timedelta(days=sessions + 6)).isoformat()
+        return last_sessions(parse_intraday(feeds.alpaca_bars(ticker, minutes, start, pair, opener)), sessions)
+    return _kept("alpaca_bars", ticker, range_, CACHE_SECONDS["alpaca_bars"], make, now.timestamp())
+
+
+def fold(bars, quote, minutes):
+    """The bars with a fresher price put in: the price joins the bar its moment falls in, or opens a
+    new one if the moment is past the last (from the last close, its volume not yet known). Only a
+    regular-session price of the last bar's own day goes in: a pre-market price is not a bar."""
+    when = moment(quote.get("at")) if quote else None
+    if not bars or not when:
+        return bars
+    last = bars[-1]
+    there = when.astimezone(prices.MARKET_TZ)
+    if (there.date() != last[0].astimezone(prices.MARKET_TZ).date() or not OPEN <= there.strftime("%H:%M") < CLOSE
+            or when < last[0]):
+        return bars
+    price, width = quote["price"], timedelta(minutes=minutes)
+    if when < last[0] + width:
+        return bars[:-1] + [(last[0], last[1], max(last[2], price), min(last[3], price), price, last[5])]
+    start = last[0] + width * int((when - last[0]) / width)
+    return bars + [(start, last[4], max(last[4], price), min(last[4], price), price, 0.0)]
+
+
+def header(bars, quote, intraday_bars, now, bars_feed=None):
     """The price shown above the chart, and whether it is live. A price newer than the last daily
     close (a later day's, or the same day's after 16:00) is shown, measured from that close; else the
-    close is, measured from the one before. Live: a session is on the clock and the price is fresh."""
+    close is, measured from the one before. Live: a session is on the clock and the price is fresh.
+    `via` names the feed it came from (`bars_feed` for a price taken from the bars)."""
     last_day, last_close = bars[-1][0], bars[-1][4]
     prev = bars[-2][4] if len(bars) > 1 else None
-    fresh = None                              # (when, price) of the newest price there is
+    fresh = None                              # (when, price, feed) of the newest price there is
     if intraday_bars:
-        fresh = (intraday_bars[-1][0], intraday_bars[-1][4])
+        fresh = (intraday_bars[-1][0], intraday_bars[-1][4], bars_feed)
     when = moment(quote["at"]) if quote else None
     if when and (fresh is None or when >= fresh[0]):
-        fresh = (when, quote["price"])
-    price, at, base = last_close, None, prev
+        fresh = (when, quote["price"], quote.get("feed"))
+    price, at, base, via = last_close, None, prev, None
     if fresh:
         local = fresh[0].astimezone(prices.MARKET_TZ)
         if local.date().isoformat() > last_day or (local.date().isoformat() == last_day
                                                     and local.strftime("%H:%M") >= CLOSE):
-            price, at, base = fresh[1], fresh[0].astimezone(timezone.utc), last_close
+            price, at, base, via = fresh[1], fresh[0].astimezone(timezone.utc), last_close, fresh[2]
     session = prices.session(at) if at else "Closed"
     live = bool(at) and (now - at) < timedelta(minutes=STALE_MINUTES) and session in LIVE_SESSIONS
     return {"price": round(price, 4), "close_day": last_day, "session": session,
             "at": at.isoformat(timespec="seconds") if at else None,
-            "at_label": at.astimezone(prices.MARKET_TZ).strftime("%H:%M") + " New York" if at else None,
+            "at_label": at.astimezone(prices.MARKET_TZ).strftime("%H:%M:%S") + " New York" if at else None,
+            "via": via,
             "change": None if not base else price / base - 1,
             "previous_close": None if not base else round(base, 4)}, live
 
 
 # ---- the chart --------------------------------------------------------------------------------
-def build(range_, bars, intraday_bars, quote, now):
+def build(range_, bars, intraday_bars, quote, now, bars_feed=None, minutes=None):
     kind = RANGES[range_][0]
-    head, live = header(bars, quote, intraday_bars, now)
+    head, live = header(bars, quote, intraday_bars, now, bars_feed)
     if kind == "daily":
         cut = (date.fromisoformat(bars[-1][0]) - timedelta(days=RANGES[range_][1])).isoformat()
         shown = [b for b in bars if b[0] >= cut]
-        out = {"bars": [_bar(b) for b in shown], "labels": None}
+        out = {"bars": [_bar(b) for b in shown], "labels": None, "bar_minutes": None}
     else:
         many = RANGES[range_][1] > 1
         out = {"bars": [[int(b[0].timestamp())] + [round(x, 4) for x in b[1:5]] + [int(round(b[5]))]
                         for b in intraday_bars],
-               "labels": [label(b[0], many) for b in intraday_bars]}
-    out.update({"range": range_, "kind": kind, "price": head, "live": live, "every_minutes": EVERY_MINUTES,
-                "split_adjusted": True, "demo": False, "currency": "USD"})
+               "labels": [label(b[0], many) for b in intraday_bars], "bar_minutes": minutes}
+    out.update({"range": range_, "kind": kind, "price": head, "live": live, "every_seconds": SLOW_SECONDS,
+                "split_adjusted": True, "demo": False, "currency": "USD", "feeds": [], "differ": False,
+                "problems": []})
     return out
 
 
-def chart(folder, ticker, range_, key=None, opener=None, now=None):
-    """The chart of one ticker over one range: {"bars", "labels", "price", "live", …}. A
-    ChartError says in words why not."""
+def _run(tasks):
+    """The tasks side by side: {label: (value, None)} or {label: (None, why)} for a feed that failed."""
+    done = {}
+    if not tasks:
+        return done
+    with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+        waiting = {label: pool.submit(task) for label, task in tasks.items()}
+        for label, future in waiting.items():
+            try:
+                done[label] = (future.result(), None)
+            except (feeds.FeedError, ChartError) as e:
+                done[label] = (None, str(e))
+    return done
+
+
+def chart(folder, ticker, range_, key=None, opener=None, now=None, extra=None):
+    """The chart of one ticker over one range: {"bars", "labels", "price", "live", …}. `extra` is
+    feeds.keys(): the other feeds there are keys for, asked side by side with Tiingo. A ChartError says in
+    words why not; a feed that fails is named in the chart's `problems` and the others carry on."""
     ticker, range_ = clean_ticker(ticker), range_ if range_ in RANGES else DEFAULT_RANGE
     if not ticker:
         raise ChartError("Type a ticker, like NVDA.")
     now = now or datetime.now(timezone.utc)
     key = key or _key()
+    have = extra or {}
     bars = daily(folder, ticker, key, opener, now)
-    if RANGES[range_][0] == "intraday":
-        got = intraday(folder, ticker, range_, key, opener, now)
-        if not got:
-            raise ChartError(f"Tiingo has no intraday prices for {ticker} yet.")
-        quote = None
-    else:
-        got, quote = [], latest(folder, ticker, key, opener, now)
-    out = build(range_, bars, got, quote, now)
-    out["ticker"] = ticker
+    intraday_range = RANGES[range_][0] == "intraday"
+    tasks = {"quote-" + name: (lambda name=name: fast_quote(folder, name, ticker, have, opener, now))
+             for name in feeds.FAST if name in have}
+    if intraday_range and feeds.ALPACA in have:
+        tasks["bars-" + feeds.ALPACA] = lambda: alpaca_intraday(folder, ticker, range_, have[feeds.ALPACA], opener, now)
+    results, problems = _run(tasks), []
+    quotes = []
+    for name in feeds.FAST:
+        if "quote-" + name in results:
+            got, why = results["quote-" + name]
+            quotes += [got] if got else []
+            problems += [why] if why else []
+    got, bars_feed, minutes = [], None, RANGES[range_][2]
+    if intraday_range:
+        tried, why = results.get("bars-" + feeds.ALPACA, (None, None))
+        problems += [why] if why else []
+        if tried:
+            got, bars_feed, minutes = tried, feeds.ALPACA, ALPACA_MINUTES[range_]
+        else:
+            got, bars_feed = intraday(folder, ticker, range_, key, opener, now), feeds.TIINGO
+            if not got:
+                raise ChartError(f"Tiingo has no intraday prices for {ticker} yet.")
+    fast = bool(quotes) or bars_feed == feeds.ALPACA
+    if not quotes and not intraday_range:      # a daily range's price, when no fast feed gave one: Tiingo's latest
+        try:
+            tiingo = latest(folder, ticker, key, opener, now)
+            quotes += [tiingo] if tiingo else []
+        except ChartError as e:
+            problems.append(str(e))
+    best, differ = feeds.combine(quotes, now)
+    if intraday_range:
+        got = fold(got, best, minutes)
+    out = build(range_, bars, got, best, now, bars_feed, minutes)
+    out.update({"ticker": ticker, "every_seconds": FAST_SECONDS if fast else SLOW_SECONDS, "differ": differ,
+                "problems": problems,
+                "feeds": [{"name": q["feed"], "price": round(q["price"], 4),
+                           "age": max(0, int((now - moment(q["at"])).total_seconds()))}
+                          for q in sorted(quotes, key=lambda q: feeds.ORDER.index(q["feed"]))]})
     with _lock:
         _cache[("built", ticker, range_)] = (now.timestamp(), out)
         _trim()
@@ -312,7 +436,7 @@ def summary(chart):
     when = (lambda i: labels[i]) if labels else (lambda i: summarise._day(bars[i][0]))
     money = lambda v: f"${v:,.2f}"
     return {"ticker": chart.get("ticker"), "range": chart["range"],
-            "bars": f"{len(bars)} " + ("daily" if chart["kind"] == "daily" else f"{RANGES[chart['range']][2]}-minute") + " bars",
+            "bars": f"{len(bars)} " + ("daily" if chart["kind"] == "daily" else f"{chart.get('bar_minutes')}-minute") + " bars",
             "from": when(0), "to": when(len(bars) - 1),
             "first_close": money(first[4]), "last_close": money(last[4]),
             "change_over_the_range": f"{(last[4] / first[4] - 1) * 100:+.1f}%",
@@ -372,8 +496,8 @@ def demo_chart(store, ticker, range_, today=None):
                 high, low = max(level, close) * (1 + rnd.uniform(0, 0.0008)), min(level, close) * (1 - rnd.uniform(0, 0.0008))
                 fake.append((first + timedelta(minutes=minutes * k), level, high, low, close, rnd.randint(20_000, 200_000)))
                 level = close
-    out = build(range_, bars, fake, None, now)
-    out.update({"ticker": ticker, "demo": True, "live": False})
+    out = build(range_, bars, fake, None, now, None, RANGES[range_][2])
+    out.update({"ticker": ticker, "demo": True, "live": False, "every_seconds": None})
     return out
 
 

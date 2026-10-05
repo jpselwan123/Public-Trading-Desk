@@ -1347,9 +1347,8 @@ def compute(raw, journal=None, today=None, news=None, prices=None, fundamentals=
         # refresh), and how often the page fetches it again; nothing for a past day
         "market_updated_at": None if as_of else (news or {}).get("synced_at"),
         "market_every_minutes": MARKET_EVERY_MINUTES,
-        # the chart tab: its ranges and how often a live one asks again are charts.py's
-        "chart": {"ranges": list(charts_mod.RANGES), "default": charts_mod.DEFAULT_RANGE,
-                  "every_minutes": charts_mod.EVERY_MINUTES},
+        # the chart tab: its ranges are charts.py's (how often a live one asks again comes with each chart)
+        "chart": {"ranges": list(charts_mod.RANGES), "default": charts_mod.DEFAULT_RANGE},
         # what each data source did at the last company update and account sync; today's only
         "health": None if as_of else health_mod.for_page(health),
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

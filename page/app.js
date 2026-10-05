@@ -136,5 +136,5 @@ function renderAll(){
 renderAll();
 showPage((location.hash || '#overview').slice(1), false);
 if (marketDue()) updateMarket(false);                          // on opening
-// the page's one timer: company data and a live chart on show, never the account
-setInterval(() => { chartTick(); if (marketWaiting) showMarket(); else if (marketDue()) updateMarket(false); }, 60000);
+// the page's one timer, ticking every few seconds: company data when it is due and a live chart on show when it is, never the account
+setInterval(() => { chartTick(); if (marketWaiting) showMarket(); else if (marketDue()) updateMarket(false); }, 5000);
