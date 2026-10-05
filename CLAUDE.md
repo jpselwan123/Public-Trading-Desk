@@ -301,13 +301,28 @@ The page is `desk_template.html` (markup) with `page/desk.css` and `page/*.js` p
 order, so a file may use at load only what earlier files declare. Tests read the joined source
 (`page_source()` in `tests/support.py`), never one file.
 
-Six tabs with hash routing (`TABS` in the template), each one subject:
+Seven tabs with hash routing (`TABS` in the template), each one subject:
 - **Overview.**
 - **Portfolio.**
 - **History:** the account year by year (`history.py`). Each past year-end is rebuilt from the
   record — shares at that day's close, cash from every movement — and used only while the same
   rebuild to today ties to the broker's total within `history.CHECK_TOLERANCE`; a year it cannot
   price says why.
+- **Chart** is `charts.py` and `page/chart.js`: any US share or fund, line or candles, 1D 5D 1M 6M 1Y 5Y, in plain SVG. Daily
+  candles are Tiingo's end-of-day bars restated for splits and not for dividends (the price that was quoted); the day's bars
+  are IEX's, regular session, in New York's clock; the price above is IEX's latest, so it can differ a little from the
+  consolidated one. An up candle is hollow and a down one filled: colour says what a number is, never whether it is good.
+  A chart on show, in a session, asks again every `charts.EVERY_MINUTES` from the page's one timer (`chartTick`, still one
+  `setInterval`), pausing when the tab is hidden or a pointer is on the chart; its requests are charged to Tiingo's 50 an
+  hour together with the company update (`charts.CHART_PER_HOUR`, `prices.update`'s `also_asked`). Reads only; the demo's
+  bars are made from its own closes.
+- **Ask** is `chat.py`, `POST /chat` and `page/chat.js`, through `summarise.ask`, the one function that holds the key. The
+  model is given, per question, the facts the page itself shows for the companies in play (the card's figures, the desk's own
+  rating, the week's headlines, what the chart on show shows), and the holdings and followed list only when the user ticks the
+  box, and then as shares and percentages, never amounts. Its rules are the summaries' rules: short, only the facts given, no
+  buy, sell, hold or target, no story said to have moved a price; an answer that advises anyway is asked for once more, then
+  replaced by a plain refusal (`chat.ADVICE`). At most `chat.PER_DAY` questions a day; the conversation is kept in `chat.json`
+  (personal, never committed); `charts.py` and `chat.py` import no broker module and never call `.post(` (`ChatBoundaryTests`).
 - **Overview's chart:** the account week by week against the S&P 500 with the same deposits
   (`history.curve`, drawn by `page/curve.js` in plain SVG, no library and no request). It comes from the same rebuild
   and only while it ties to the broker's total; the last point is the broker's own figure; a week without a close is

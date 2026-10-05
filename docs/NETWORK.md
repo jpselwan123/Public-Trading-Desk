@@ -20,11 +20,11 @@ images. Its two typefaces (Archivo and IBM Plex Sans, under the SIL Open Font Li
 | `api.alpaca.markets`, `paper-api.alpaca.markets` | Your Alpaca account (`BROKER=alpaca`). Three read paths | Your API key pair | When you press sync |
 | `ndcdyn.interactivebrokers.com` | Your Interactive Brokers Flex report (`BROKER=ibkr`). Reports only | Your Flex token and query number | When you press sync |
 | `www.sec.gov`, `data.sec.gov` | Filings, company financials, the list of companies and exchanges, industry codes | A company's number or ticker. The SEC asks automated requests to name a contact, so your `SEC_CONTACT` email is in the request's `User-Agent` | Company updates: when the desk opens and every 30 minutes while open |
-| `api.tiingo.com` | Daily prices and after-hours quotes | Tickers of shares you hold, follow or have traded, and a start date; your Tiingo key | Company updates |
+| `api.tiingo.com` | Daily prices and after-hours quotes; the Chart tab's candles and the day's bars | Tickers of shares you hold, follow or have traded, and a start date; any ticker you type into the Chart tab; your Tiingo key | Company updates, and when you open a chart (a live one on show asks again every few minutes while the market is open) |
 | `finnhub.io` | Results dates, analysts' estimates, company news | A ticker and a date range; your Finnhub key | Company updates |
 | `fred.stlouisfed.org` | The Treasury bill rate and exchange rates, as public CSV files | A series name. No key | Company updates |
 | `news.google.com` | News from the FT, Reuters, Bloomberg and others, through Google News's search feed | Search terms: the company's name, an outlet's domain and a number of days. No key | Company updates |
-| `api.openai.com` | A plain-English company summary, or a week's news brief | The company's public figures (from filings and prices) or its headlines; your OpenAI key. **Only when you ask for one.** It is never sent your holdings, trades or notes | On request only |
+| `api.openai.com` | A plain-English company summary, a week's news brief, or an answer in the Ask chat | The company's public figures (from filings and prices) or its headlines; for Ask, your question, the last few turns of the talk, and the figures the desk holds for the company on show; your OpenAI key. **Only when you ask.** It is never sent your trades or notes. Your holdings go only if you tick "Include my holdings" in Ask, and then as each holding's ticker, share of the holdings, gain on cost in percent, days held and the desk's rating: no quantity, value or balance | On request only |
 | `github.com` | New code for the desk, with `git fetch` | Nothing but the request. **Only if you set `AUTO_UPDATE=1`** | When the desk opens, if you turned it on |
 
 Tickers and companies in these requests reveal to those services which shares you follow or hold.
@@ -35,7 +35,8 @@ demo.
 ## What is never sent anywhere
 
 Your balances, your holdings' quantities and values, your trades, your account number, your notes,
-plans and theses. They are read from your broker into files on your computer and stay there.
+plans and theses. They are read from your broker into files on your computer and stay there. (The one
+opt-in: Ask's "Include my holdings" box, which sends tickers and percentages, never amounts, as the table says.)
 
 ## Check it yourself
 

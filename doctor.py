@@ -36,6 +36,8 @@ STORES = (("account", "t212_data.json", "synced_at"),
           ("plans", "plans.json", None),
           ("last looked", "looks.json", "last"),
           ("news in brief", "briefs.json", None),
+          ("chat", "chat.json", None),
+          ("chart requests", "charts.json", None),
           ("rating sample", "rating_sample.json", "drawn_at"),
           ("ratings log", "ratings_log.json", None),
           ("coverage", "watchlist.json", None))
@@ -164,6 +166,10 @@ def sources(environ, opener=None, today=None, run=subprocess.run, account=False,
           {"User-Agent": f"trading-desk personal research ({contact})"})
     check("Tiingo (prices)", "TIINGO_API_KEY", "https://api.tiingo.com/tiingo/daily/spy",
           {"Authorization": f"Token {environ.get('TIINGO_API_KEY', '').strip()}"})
+    import charts
+    check("Tiingo (chart bars)", "TIINGO_API_KEY", charts.IEX_URL.format(
+        ticker="spy", start=(today - timedelta(days=7)).isoformat(), minutes=5),
+          {"Authorization": f"Token {environ.get('TIINGO_API_KEY', '').strip()}"})
     check("Finnhub (results, news)", "FINNHUB_API_KEY",
           f"https://finnhub.io/api/v1/quote?symbol=SPY&token={environ.get('FINNHUB_API_KEY', '').strip()}")
     import headlines
@@ -283,6 +289,14 @@ def stores(folder, now):
         elif name == "briefs.json":
             parts.append(f"{len(data)} {'company' if len(data) == 1 else 'companies'}, latest written " + ago(max((b or {}).get("written_at") or "" for b in data.values()), now)
                          if isinstance(data, dict) and data else "none written")
+        elif name == "chat.json":      # how many turns and questions, never what was said
+            turns = data.get("turns") if isinstance(data, dict) else None
+            asked = [a for a in (data.get("asked") if isinstance(data, dict) else None) or [] if isinstance(a, str)]
+            parts.append("unreadable" if turns is None else f"{len(turns)} turns, {sum(1 for a in asked if a[:10] == now.date().isoformat())} questions today")
+        elif name == "charts.json":
+            hour = (now - timedelta(hours=1)).isoformat()
+            asked = [a for a in (data.get("asked") if isinstance(data, dict) else None) or [] if isinstance(a, str)]
+            parts.append(f"{sum(1 for a in asked if a > hour)} in the last hour, {len(asked)} in the last day")
         elif name == "plans.json":
             count = len(data.get("plans") or []) if isinstance(data, dict) else None
             parts.append("unreadable" if count is None else f"{count} plan" + ("" if count == 1 else "s"))

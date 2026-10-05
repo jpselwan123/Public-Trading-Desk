@@ -514,7 +514,8 @@ class RatingTwoTests(unittest.TestCase):
         self.assertLess(source.index('("Stock exchanges"'), source.index('("Rating sample"'))
         self.assertLess(source.index('("Rating sample"'), source.index('("Rating sample prices"'))
         # the lanes run side by side, so its closes wait for the sample to be drawn, by name
-        self.assertIn('slow=rating.load_sample(self.folder).get("tickers") or []),\n'
+        self.assertIn('slow=rating.load_sample(self.folder).get("tickers") or [],\n'
+                      '                                                            also_asked=charts.asked(self.folder)),\n'
                       '                                              "prices.json"), "tiingo", ("Rating sample",)),', source)
         self.assertIn("slow=self.sold_lately()", source)                  # a year after each sale, for habits.replaced
         self.assertIn("sample=sample", inspect.getsource(server.Handler.log_ratings))

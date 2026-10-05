@@ -26,7 +26,7 @@ ALLOWED_FILES = {"scripts/privacy_scan.py"}  # contains the patterns themselves
 NEVER_TRACK = {".env", "t212_data.json", "account.csv", "desk_data.json", "journal.json", "theses.json", "diffs.json", "index.html",
                "news_data.json", "headlines.json", "health.json", "looks.json", "plans.json", "rating_sample.json", "watchlist.json", ".cik_map.json", "fundamentals.json",
                "earnings_data.json", "prices.json", "summaries.json", "briefs.json", "paper.json", "research.json", "analysts_data.json", "orders.json", "power.json", "instruments.json",
-               "quotes.json", "ratings_log.json", "TradingDesk-phone.zip", "PHONE_BUNDLE.json",
+               "quotes.json", "ratings_log.json", "chat.json", "charts.json", "TradingDesk-phone.zip", "PHONE_BUNDLE.json",
                "CLAUDE.local.md"}
 
 

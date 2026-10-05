@@ -17,6 +17,7 @@ function jumpEntries(){
     label: c.ticker, note: c.name || '', hint: 'Company', mono: true,
     go: () => { showPage('companies'); pickCompany(c.ticker);
                 const card = document.querySelector('#coList .co[data-co="' + c.ticker + '"]'); if (card) card.scrollIntoView({block: 'start'}); }}));
+  if (typeof openChat === 'function' && !DATA.as_of) rows.push({label: 'Ask a question', hint: 'Action', go: () => openChat()});
   [['refreshBtn', 'Sync your account'], ['marketAt', 'Update the companies now']].forEach(([id, label]) => {
     const b = $(id); if (b && !b.disabled && b.offsetParent !== null) rows.push({label, hint: 'Action', go: () => b.click()});
   });

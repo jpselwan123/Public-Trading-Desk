@@ -891,14 +891,15 @@ class LookTests(unittest.TestCase):
         self.assertEqual(template_function("renderResearch").count("return ruleOpen("), 2)
         self.assertIn("let newsFilter = 'material';", template)
 
-    def test_six_tabs_hold_every_section_once(self):
+    def test_seven_tabs_hold_every_section_once(self):
         """Nine tabs were too many to find anything in (25 Sep 2026). Five, each one
         subject: every section sits under exactly one, and an old address still lands. A
-        sixth, History, the account year by year, (28 Sep 2026)."""
+        sixth, History, the account year by year, (28 Sep 2026), and a seventh, Chart, a line
+        or candles for any US share (5 Oct 2026)."""
         template = self.template()
         block = template[template.index("const TABS = ["):template.index("];", template.index("const TABS = ["))]
         tabs = re.findall(r"\{id:'(\w+)',\s*label:'([^']+)',\s*pages:\[([^\]]*)\]", block)
-        self.assertEqual([t[1] for t in tabs], ["Overview", "Portfolio", "History", "Companies", "Research", "Trades"])
+        self.assertEqual([t[1] for t in tabs], ["Overview", "Portfolio", "History", "Companies", "Chart", "Research", "Trades"])
         pages = [p for t in tabs for p in re.findall(r"'(\w+)'", t[2])]
         sections = re.findall(r'<section class="page" id="page-(\w+)"', template)
         self.assertEqual(sorted(pages), sorted(sections))

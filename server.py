@@ -19,6 +19,8 @@
   POST /screen     run a screen over the stored universe
   POST /check      {ticker, side, amount}: the facts about a trade before it is placed (trade_check.py);
                    reads only, sends nothing
+  POST /chart      {ticker, range}: the bars of one US share or fund (charts.py); reads only
+  POST /chat       {message, ticker, range, mine} or {op: history|clear}: Ask, the chat (chat.py)
 
 Requests from other websites are refused (Host and Origin must be this server), so a
 page elsewhere can't trigger a refresh or write notes. The one other way in is opt-in:
@@ -32,7 +34,7 @@ from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from env_config import atomic_write_json, load_env, read_for_writing, UnreadableStore, PARTLY, SETUP_STEPS, scrub
 from health import timing   # noqa: F401  (the refresh's "Took …" line; health.py owns it)
-import analysts, asof, brief, broker, build_desk, context, diffs, earnings, fundamentals, headlines, health, looks, news, paper, plans, prices, rating, research, screen, sectors, summarise, t212, thesis, trade_check, universe, value
+import analysts, asof, brief, broker, build_desk, charts, chat, context, diffs, earnings, fundamentals, headlines, health, looks, news, paper, plans, prices, rating, research, screen, sectors, summarise, t212, thesis, trade_check, universe, value
 
 HOST, PORT = "127.0.0.1", 8935
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -274,6 +276,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(*self.run_screen(body))
         if path == "/check":
             return self._send(*self.check_trade(body))
+        if path == "/chart":
+            return self._send(*self.price_chart(body))
+        if path == "/chat":
+            return self._send(*self.chat_turn(body))
         self._send(404, {"error": "not found"})
 
     def _stream(self, work):
@@ -557,11 +563,13 @@ class Handler(BaseHTTPRequestHandler):
                                                           universe.load_listings()) and None, None), "sec", ()),
             # Tiingo: the closes, the latest prices, then the rating sample's closes, once it is drawn
             ("Prices", lambda: (prices.update(priced, stored=prices.load(self.prices_file()), currency=self.account_currency(),
-                                              slow=self.sold_lately(), traded=self.traded_us_shares(book)),
+                                              slow=self.sold_lately(), traded=self.traded_us_shares(book),
+                                              also_asked=charts.asked(self.folder)),
                                 "prices.json"), "tiingo", ()),
             ("Latest prices", lambda: (prices.fetch_latest(covered), "quotes.json"), "tiingo", ()),
             ("Rating sample prices", lambda: (prices.update([], stored=prices.load(self.prices_file()), cash=None, fx=None,
-                                                            slow=rating.load_sample(self.folder).get("tickers") or []),
+                                                            slow=rating.load_sample(self.folder).get("tickers") or [],
+                                                            also_asked=charts.asked(self.folder)),
                                               "prices.json"), "tiingo", ("Rating sample",)),
             # Finnhub: results dates, analysts' ratings, and what was written about each company
             # since the last update; the FT and the press (Google News) in a lane of their own,
@@ -674,7 +682,8 @@ class Handler(BaseHTTPRequestHandler):
 
         def closes():
             # a company just followed may use the requests the company update keeps spare
-            fresh = prices.update([ticker], stored=prices.load(self.prices_file()), cash=None, fx=None, spare=0)
+            fresh = prices.update([ticker], stored=prices.load(self.prices_file()), cash=None, fx=None, spare=0,
+                                  also_asked=charts.asked(self.folder))
             return Merge(lambda stored: prices.merge_ticker(stored, fresh, ticker), load=prices.load,
                          partly=fresh.pop(PARTLY, None)), "prices.json"
 
@@ -825,6 +834,39 @@ class Handler(BaseHTTPRequestHandler):
                 split = value.splits_since(row, stored, ticker, max(closes), (store or {}).get("built"))
         return 200, {"ok": True, "check": trade_check.check(ticker, side, amount, data, card=card, ratings=ratings,
                                                              store=store, codes=codes, price=price, split=split)}
+
+    def price_chart(self, body):
+        """The chart of one ticker over one range (charts.py). Reads only. The demo's is made from its
+        own closes and reaches no one."""
+        ticker = charts.clean_ticker(body.get("ticker"))
+        if not ticker:
+            return 200, {"ok": False, "message": "Type a ticker, like NVDA."}
+        range_ = str(body.get("range") or charts.DEFAULT_RANGE).upper()
+        try:
+            if self.demo:
+                made = charts.demo_chart(prices.load(self.prices_file()), ticker, range_)
+            else:
+                made = charts.chart(self.folder, ticker, range_)
+        except charts.ChartError as e:
+            return 200, {"ok": False, "message": str(e)}
+        return 200, {"ok": True, "chart": made}
+
+    def chat_turn(self, body):
+        """A question to the chat (chat.py), the conversation kept, or the conversation cleared. Reads
+        what the desk holds and writes only chat.json; it sends nothing to Trading 212."""
+        op = body.get("op") if body.get("op") in ("history", "clear") else "ask"
+        try:
+            if op == "history":
+                return 200, {"ok": True, "turns": chat.turns(self.folder), "left_today": chat.left_today(self.folder)}
+            if op == "clear":
+                chat.clear(self.folder)
+                return 200, {"ok": True, "turns": [], "left_today": chat.left_today(self.folder)}
+            data = build_desk.load_json(os.path.join(self.folder, "desk_data.json"), {})
+            got = chat.ask(self.folder, data, body.get("message"), ticker=body.get("ticker"),
+                           range_=str(body.get("range") or "").upper(), mine=body.get("mine") is True)
+        except chat.ChatError as e:
+            return 200, {"ok": False, "message": str(e)}
+        return 200, dict(got, ok=True)
 
     def run_screen(self, body):
         """Which companies meet the conditions asked for. Reads only.

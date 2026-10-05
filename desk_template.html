@@ -23,6 +23,9 @@ __PAGE_CSS__
         <button class="jump-btn" id="jumpBtn" type="button" aria-label="Jump to a tab, a section or a company" title="Jump to (Ctrl or ⌘ + K)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg><span>Jump to</span>
         </button>
+        <button class="jump-btn" id="askBtn" type="button" aria-label="Ask a question about what you see" title="Ask a question">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.5-4.6A8 8 0 1 1 21 12z"/></svg><span>Ask</span>
+        </button>
         <button class="sync sync-btn" id="marketAt" type="button" title="Update the companies&rsquo; filings, prices and ratings now"></button>
         <span class="sync" id="synced">account not synced yet</span>
         <button class="refresh" id="refreshBtn" aria-label="Sync your account" title="Sync your account">
@@ -202,6 +205,29 @@ __PAGE_CSS__
         </div>
       </div>
       <div id="newsList"></div>
+    </div>
+  </section>
+
+  <!-- ============ CHART ============ -->
+  <section class="page" id="page-chart" role="tabpanel" aria-label="Chart">
+    <div class="page-head">
+      <h2>Chart</h2>
+      <p class="page-note asof-only">Charts show the market today, not a past day.</p>
+    </div>
+    <div class="card pcx" id="pcx">
+      <form class="pc-pick" id="pcForm" autocomplete="off">
+        <input id="pcTicker" placeholder="Ticker, like NVDA" maxlength="8" aria-label="Show the chart of a ticker" autocapitalize="characters" spellcheck="false">
+        <button class="btn primary" type="submit">Show</button>
+      </form>
+      <div class="pc-chips" id="pcChips"></div>
+      <div class="pc-head" id="pcHead"></div>
+      <div class="pc-bar">
+        <div class="seg" id="pcKind" role="group" aria-label="Line or candles"></div>
+        <div class="seg" id="pcRange" role="group" aria-label="Range"></div>
+        <button class="btn" id="pcAsk" type="button">Ask about this</button>
+      </div>
+      <div class="pc-plot" id="pcPlot" tabindex="0" role="group" aria-label="Price chart. Left and right arrow keys move along it."></div>
+      <div class="pc-note" id="pcNote" role="status"></div>
     </div>
   </section>
 
@@ -419,6 +445,20 @@ __PAGE_CSS__
   </form>
 </dialog>
 
+
+<!-- Ask: the chat beside the page (chat.py). It sends nothing to the broker and places nothing. -->
+<aside class="chat" id="chat" hidden aria-label="Ask a question">
+  <div class="chat-head">
+    <b>Ask</b><span class="chat-ctx" id="chatCtx"></span>
+    <span class="chat-tools"><button type="button" class="chat-x" id="chatClear">Clear</button><button type="button" class="chat-x" id="chatClose" aria-label="Close the chat">&times;</button></span>
+  </div>
+  <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
+  <div class="chat-sugg" id="chatSugg"></div>
+  <form class="chat-form" id="chatForm" autocomplete="off">
+    <label class="chat-own"><input type="checkbox" id="chatMine"><span>Include my holdings <span class="faint">(shares and percentages, never amounts)</span></span></label>
+    <div class="chat-row"><input id="chatInput" maxlength="600" placeholder="Ask about what you see" aria-label="Your question"><button class="btn primary" id="chatSend" type="submit">Send</button></div>
+  </form>
+</aside>
 
 <script>
 __PAGE_JS__

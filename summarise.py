@@ -53,7 +53,7 @@ def api_key():
     load_env(os.path.join(HERE, ".env"))
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not key:
-        raise SummaryError("Add OPENAI_API_KEY=… to .env to write summaries")
+        raise SummaryError("Add OPENAI_API_KEY=… to .env (the summaries, the weekly briefs and the chat use it)")
     return key
 
 
@@ -154,14 +154,17 @@ def facts_for(card):
     return facts
 
 
-def ask(instructions, text, key=None, model=None, max_tokens=MAX_OUTPUT_TOKENS, opener=None):
+def ask(instructions, text, key=None, model=None, max_tokens=MAX_OUTPUT_TOKENS, opener=None, history=None):
     """One request to OpenAI: the instructions and the text, and the model's answer; with
-    the model that wrote it. Every piece of writing on the desk goes through here."""
+    the model that wrote it. Every piece of writing on the desk goes through here. `history` is
+    the conversation so far, [(role, text)] with the role "user" or "assistant" (the chat, chat.py)."""
     key, model = key or api_key(), model or model_name()
+    earlier = [{"role": role, "content": [{"type": "input_text" if role == "user" else "output_text", "text": said}]}
+               for role, said in history or [] if role in ("user", "assistant") and said]
     body = json.dumps({
         "model": model,
         "instructions": instructions,
-        "input": [{"role": "user", "content": [{"type": "input_text", "text": text}]}],
+        "input": earlier + [{"role": "user", "content": [{"type": "input_text", "text": text}]}],
         "max_output_tokens": max_tokens,
     }).encode()
     req = urllib.request.Request(URL, data=body, method="POST", headers={

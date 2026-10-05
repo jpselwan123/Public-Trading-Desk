@@ -125,7 +125,7 @@ document.addEventListener('focusout', () => setTimeout(() => { if (marketWaiting
 /* ---------------- boot ---------------- */
 function renderAll(){
   // by name, so one missing renderer can never blank the whole page
-  ['renderAsOf','renderHeader','renderHero','renderPerformance','renderDigest','renderHealth','renderChecks','renderHeadlines','renderUpcoming',
+  ['renderAsOf','renderHeader','renderHero','renderPerformance','renderChart','renderAsk','renderDigest','renderHealth','renderChecks','renderHeadlines','renderUpcoming',
    'renderHoldings','renderExposure','renderTilt','renderCosts','renderDividends','renderHistory','renderRisk','renderCompanies','renderCompanyNews','renderNews','reactionNote',
    'renderMix','renderCheckCard','renderPlans','renderClosed','renderHabits','renderTheses','renderTrades','renderPaper','renderBuyList','renderResearch','renderRatingRecord','renderScreener','renderNav'].forEach(name => {
     const fn = window[name];
@@ -136,5 +136,5 @@ function renderAll(){
 renderAll();
 showPage((location.hash || '#overview').slice(1), false);
 if (marketDue()) updateMarket(false);                          // on opening
-// the page's one timer: company data only, never the account
-setInterval(() => { if (marketWaiting) showMarket(); else if (marketDue()) updateMarket(false); }, 60000);
+// the page's one timer: company data and a live chart on show, never the account
+setInterval(() => { chartTick(); if (marketWaiting) showMarket(); else if (marketDue()) updateMarket(false); }, 60000);

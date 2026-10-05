@@ -44,6 +44,8 @@ function renderHoldings(){
         kv('Opened', fmtDay(r.opened)) + kv('Held', held(r.days_held)) +
         kv('Desk rating', r.rating && r.rating.label ? esc(r.rating.label) + '<div class="dash-why">' + ratingPlace(r.rating) + '</div>'
            : '–' + (r.rating ? '<div class="dash-why">' + esc(sentence(r.rating.why_not)) + '</div>' : '')) +
+        (r.us_line ? '<div class="h-acts"><button type="button" class="btn" data-chart="' + esc(r.ticker) + '">Chart</button>' +
+          '<button type="button" class="btn" data-ask="' + esc(r.ticker) + '">Ask</button></div>' : '') +
       '</div>';
   });
   // an export's line with no daily close is valued at what it cost (broker.complete), and says so

@@ -46,7 +46,9 @@ Nobody has audited this code but its author and its tests, and it is early. If y
 |---|---|
 | ![Companies](docs/screens/companies.png) | ![Research](docs/screens/research.png) |
 
-![Trades: was it better than doing nothing?](docs/screens/trades.png)
+| Chart: candles or a line for any US share | Trades: was it better than doing nothing? |
+|---|---|
+| ![Chart](docs/screens/chart.png) | ![Trades](docs/screens/trades.png) |
 
 *Everything on these screens is invented: the account, the companies (about 270 of them), their filings, figures and stories, made by the desk's own code over a simulated market (`scripts/generate_demo_data.py`). With your own keys the same screens fill with real companies.*
 
@@ -99,7 +101,7 @@ Step by step for each broker, and the CSV column format: [`docs/BROKERS.md`](doc
    - `SEC_CONTACT`: your email address. The SEC asks automated requests to name a contact. It is sent only to the SEC.
    - `TIINGO_API_KEY` from [tiingo.com](https://www.tiingo.com): daily prices.
    - `FINNHUB_API_KEY` from [finnhub.io](https://finnhub.io): results dates, estimates and news.
-   - `OPENAI_API_KEY` is optional, for plain-English company summaries. It is billed to you.
+   - `OPENAI_API_KEY` is optional, for plain-English company summaries, the weekly news briefs and the **Ask** chat. It is billed to you.
 4. Start the desk and press the round sync button:
    ```bash
    ./desk.sh
@@ -110,7 +112,7 @@ Step by step for each broker, and the CSV column format: [`docs/BROKERS.md`](doc
 
 ## What is on the page
 
-Six tabs:
+Seven tabs, and an **Ask** button for a chat beside any of them:
 
 - **Overview**: what the account is worth, drawn week by week beside the same deposits put into the S&P 500 on the same days (hover, touch or use the arrow keys to read any week). The line is drawn only while the rebuilt history ties to your broker's total. Press Ctrl/⌘+K, or `/`, to jump to any tab, section or company. What is new since you last looked: important filings, insider buys, rating changes, the biggest moves. The checks against your broker.
 - **Portfolio**: holdings, what you own by industry, which of the rating's four themes the holdings lean toward, what investing has cost (fees and tax withheld from dividends), dividends and cash.
@@ -120,6 +122,7 @@ Six tabs:
   - figures from its SEC filings, two published scoring models (Piotroski, Altman) and its rank in its industry;
   - how accurate the analysts' estimates of it have been;
   - its filings in plain words, and its news beside each day's move against the market, with days that moved unusually marked.
+- **Chart**: a line or candles for any US share or fund, over a day, five days, a month, six months, a year or five years, with volume and the price above it. Candles are restated for splits; an up candle is hollow and a down one filled, because colour here says what a number is, never whether it is good. A chart on show in a market session asks again every few minutes, within Tiingo's free allowance (it is the same key and the same 50 requests an hour as the company update). Prices are IEX's for the day, so they can differ a little from the consolidated price.
 - **Research**:
   - the desk's Buy list;
   - trading rules tested on real history after costs;
@@ -134,6 +137,8 @@ Six tabs:
 Any day can also be viewed **as it was**: every figure is cut to what was known on that day.
 
 It also runs on an iPhone in the free a-Shell app ([`docs/IPHONE.md`](docs/IPHONE.md)), or your computer's desk can be opened from your phone through Tailscale ([`docs/ONE-DESK.md`](docs/ONE-DESK.md)).
+
+**Ask** (the button beside Jump to) is a short chat about the company on show, answered by your own OpenAI model from the figures the desk holds for it: its filings' numbers, the desk's rating, the week's headlines and what the chart shows. It does not advise (no buy, sell or hold, no target prices), places nothing, and sends your holdings only if you tick the box, and then as shares and percentages, never amounts. At most 100 questions a day; the conversation is kept on your machine in `chat.json`.
 
 ## The desk's rating
 

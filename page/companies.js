@@ -403,7 +403,9 @@ function renderCompanies(){
              lives in "What analysts say", where its known skew is stated beside it (Q4) */
           (c.analysts ? '<span class="pill">' + c.analysts.analysts + ' analysts</span>' : '') +
           resultsPill(c) +
-        '</span><span class="nm">' + esc(c.name) + '</span>' + coverageLine(c.coverage, c.ticker, c) + '</span>' +
+        '</span><span class="nm">' + esc(c.name) + '</span>' + coverageLine(c.coverage, c.ticker, c) +
+        '<span class="co-acts"><button type="button" class="btn" data-chart="' + esc(c.ticker) + '">Chart</button>' +
+        '<button type="button" class="btn" data-ask="' + esc(c.ticker) + '">Ask</button></span></span>' +
         '<span class="co-price"><span class="co-prices">' +
           '<span class="co-pxcol"><span class="co-px-k">Close' + (p.as_of ? ' ' + fmtDay(p.as_of) : '') + '</span>' +
             '<span class="co-px">' + priceText(p) + '</span></span>' + latestCol(p) + '</span>' +

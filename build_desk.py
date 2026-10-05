@@ -13,6 +13,7 @@ import prices as price_store
 import bridge
 import broker as broker_mod
 import brief as brief_mod
+import charts as charts_mod
 import context
 import diffs
 import forecasts
@@ -40,8 +41,8 @@ TEMPLATE = os.path.join(HERE, "desk_template.html")
 # may use at load only what the files before it declare.
 PAGE = os.path.join(HERE, "page")
 PAGE_STYLE = "desk.css"
-PAGE_SCRIPTS = ("core.js", "pages.js", "overview.js", "curve.js", "palette.js", "portfolio.js", "history.js", "companies.js", "filings.js", "sources.js",
-                "news.js", "screener.js", "trades.js", "research.js", "journal.js", "app.js")
+PAGE_SCRIPTS = ("core.js", "pages.js", "overview.js", "curve.js", "chart.js", "palette.js", "portfolio.js", "history.js", "companies.js", "filings.js", "sources.js",
+                "news.js", "screener.js", "trades.js", "research.js", "journal.js", "chat.js", "app.js")
 DIVIDEND_MONTHS = 24        # months shown in the dividend chart
 MAX_JOURNAL_CHARS = 2000
 
@@ -1346,6 +1347,9 @@ def compute(raw, journal=None, today=None, news=None, prices=None, fundamentals=
         # refresh), and how often the page fetches it again; nothing for a past day
         "market_updated_at": None if as_of else (news or {}).get("synced_at"),
         "market_every_minutes": MARKET_EVERY_MINUTES,
+        # the chart tab: its ranges and how often a live one asks again are charts.py's
+        "chart": {"ranges": list(charts_mod.RANGES), "default": charts_mod.DEFAULT_RANGE,
+                  "every_minutes": charts_mod.EVERY_MINUTES},
         # what each data source did at the last company update and account sync; today's only
         "health": None if as_of else health_mod.for_page(health),
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

@@ -393,7 +393,7 @@ def month_end_before(day):
 
 
 def update(tickers, stored=None, key=None, fetch=fetch_prices, today=None, cash=fetch_cash_rates,
-           currency=None, fx=fetch_fred, now=None, slow=None, spare=SPARE, traded=None):
+           currency=None, fx=fetch_fred, now=None, slow=None, spare=SPARE, traded=None, also_asked=()):
     """Nothing is asked for that cannot have changed. The company data updates by itself
     every build_desk.MARKET_EVERY_MINUTES, and Tiingo's free key allows 50 requests an
     hour: so the benchmark is asked first, and only once a session has closed, and a
@@ -405,7 +405,8 @@ def update(tickers, stored=None, key=None, fetch=fetch_prices, today=None, cash=
     is left unused: the company update keeps SPARE back; a company just followed (spare=0)
     may use it. `traded` is {ticker: the first day it was traded in the account}: each is
     fetched whole from that day once, so a split while it was held is known, and then only
-    as the other lists ask."""
+    as the other lists ask. `also_asked` is when the charts made their own requests (charts.py):
+    they spend the same allowance."""
     key = key or api_key()
     stored = dict(stored or {})
     stored.pop(PARTLY, None)                # an old one is never this update's
@@ -427,9 +428,11 @@ def update(tickers, stored=None, key=None, fetch=fetch_prices, today=None, cash=
     waiting = 0
     failed = []                             # why a request failed: nothing more is asked, what came is kept
 
+    charted = [a for a in also_asked if isinstance(a, str) and a > day_ago]
+
     def room():
-        return (sum(1 for a in asked if a > hour_ago) < TIINGO_PER_HOUR - spare
-                and len(asked) < TIINGO_PER_DAY - spare)
+        return (sum(1 for a in asked + charted if a > hour_ago) < TIINGO_PER_HOUR - spare
+                and len(asked) + len(charted) < TIINGO_PER_DAY - spare)
 
     def ask(ticker, start):
         """The closes from `start`, or None once a request has failed: the rest wait."""
