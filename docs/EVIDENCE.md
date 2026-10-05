@@ -88,6 +88,7 @@ No study promises a return, and the most careful ones say the edges are small.
 | Gains against losses sold (PGR, PLR), each holding against its average purchase price | Odean (1998), beside his 14.8% and 9.8% |
 | What replaced a sale: a purchase within 21 days, followed for 252 trading days | Odean (1999) |
 | Returns money-weighted, never annualised under a year | GIPS |
+| A yearly money-weighted rate is stated only once the money has been at work for a year, and a return for under a year only if it was at work for half of it; money is at work while the net put in stands at a tenth of its highest or more (`build_desk.MWR_AT_WORK_SHARE`, `days_at_work`) | The year is GIPS's. The tenth and the half are the desk's choice, a guard and not a finding: an account that sat at pence for two years with money passing through it for weeks read +4299.8% a year, a rate resting on the pence that stayed. The rate is withheld with its reason, never shown beside a warning |
 | The S&P 500 with the same money on the same days | A plain comparison: SPY's total return |
 | History's rebuilt years used while today's rebuild ties to the broker's total within 1% | The desk's choice, a check on the data, not a finding |
 | The performance chart: one point a week (`history.CURVE_STEP_DAYS`), the last point the broker's own total; weeks with no close left out, and the line withheld if more than a fifth are (`CURVE_MOST_SKIPPED`) | The desk's choice, a display resolution and a guard, not a finding. It is drawn only while History's check above passes |

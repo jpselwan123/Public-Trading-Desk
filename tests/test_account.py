@@ -432,6 +432,59 @@ class MetricTests(unittest.TestCase):
         self.assertLess(r["days"], 365)
         self.assertAlmostEqual(r["period"], 0.05, places=3)
 
+    def test_days_at_work_counts_the_days_the_net_put_in_stood_at_a_tenth_of_its_highest(self):
+        """By hand: 100 in on 1 Jan, 95 out on 11 Jan, 5 in on 1 Feb, to 1 Mar. The net stands at 100 for 10 days,
+        at 5 (under the tenth, 10) for 21 days, and at 10 (the tenth) for the last 28."""
+        flows = [("2026-01-01", 100.0), ("2026-01-11", -95.0), ("2026-02-01", 5.0)]
+        self.assertEqual(build_desk.days_at_work(flows, "2026-03-01"), 10 + 28)
+        self.assertEqual(build_desk.days_at_work([("2026-01-01", 100.0)], "2026-01-31"), 30)
+        self.assertEqual(build_desk.days_at_work([("2026-01-01", 100.0), ("2026-01-01", -100.0)], "2026-01-31"), 0)
+        self.assertEqual(build_desk.days_at_work([("2026-01-01", -5.0)], "2026-01-31"), 0)       # nothing was ever put in
+        self.assertEqual(build_desk.days_at_work([], "2026-01-31"), 0)
+        # a deposit and a withdrawal on one day are one movement: the order the records come in does not matter
+        a = build_desk.days_at_work([("2026-01-01", 100.0), ("2026-01-05", 50.0), ("2026-01-05", -50.0)], "2026-01-31")
+        b = build_desk.days_at_work([("2026-01-01", 100.0), ("2026-01-05", -50.0), ("2026-01-05", 50.0)], "2026-01-31")
+        self.assertEqual((a, b), (30, 30))
+
+    def test_an_account_that_sat_near_empty_for_years_states_no_yearly_rate(self):
+        """4 pounds in an account that had money passing through it for a few weeks and pennies for 2.7 years:
+        the yearly rate (which the IRR still solves) rests on the pennies, and it once read +4299.8% a year."""
+        flows = [("2024-01-15", 150.0), ("2024-01-22", -149.7), ("2026-03-20", 265.0), ("2026-04-24", -264.0),
+                 ("2026-06-12", 130.0), ("2026-07-10", -130.4)]
+        r = build_desk.money_weighted_return(flows, 3.98, "2026-10-05")
+        self.assertGreater(r["days"], 365)
+        self.assertLess(r["at_work"], 365)
+        self.assertIsNone(r["shown"])
+        self.assertFalse(r["steady"])
+        self.assertIn("only %d of the %d days" % (r["at_work"], r["days"]), r["why"])
+        self.assertIn("a yearly rate needs a year of it", r["why"])
+        # the same pennies and a hundred pounds that stayed two years: the rate is stated
+        steady = build_desk.money_weighted_return(flows + [("2024-02-01", 100.0)], 120.0, "2026-10-05")
+        self.assertEqual(steady["shown"], "annual")
+        self.assertIsNone(steady["why"])
+
+    def test_the_figure_that_may_be_stated(self):
+        # a year of money at work: the yearly rate, whatever the calendar says
+        r = build_desk.money_weighted_return([("2024-09-19", 1000)], 1210, "2026-09-19")
+        self.assertEqual((r["shown"], r["at_work"], r["days"]), ("annual", 730, 730))
+        r = build_desk.money_weighted_return([("2025-09-19", 1000)], 1100, "2026-09-19")
+        self.assertEqual(r["shown"], "annual")                                           # exactly a year is a year
+        # a young account: the period's own return, never annualised
+        r = build_desk.money_weighted_return([("2026-06-21", 1000)], 1050, "2026-09-19")
+        self.assertEqual(r["shown"], "period")
+        # ...unless the money was at work for under half of it
+        r = build_desk.money_weighted_return([("2026-06-21", 1000), ("2026-06-23", -990)], 12, "2026-09-19")
+        self.assertIsNone(r["shown"])
+        self.assertNotIn("yearly", r["why"])
+        # a regular saver of 14 months keeps the yearly rate: the money was at work from the second month
+        saver = [((date(2025, 8, 1) + timedelta(days=30 * k)).isoformat(), 500.0) for k in range(14)]
+        r = build_desk.money_weighted_return(saver, 7600.0, "2026-10-05")
+        self.assertEqual(r["shown"], "annual")
+        # Excel's own XIRR example (more out than in) is 411 days of it
+        r = build_desk.money_weighted_return([("2008-01-01", 10000), ("2008-03-01", -2750), ("2008-10-30", -4250),
+                                              ("2009-02-15", -3250)], 2750, "2009-04-01")
+        self.assertEqual(r["shown"], "annual")
+
     def test_mwr_with_withdrawal(self):
         r = build_desk.money_weighted_return([("2025-09-19", 1000), ("2026-03-20", -500)], 0, "2026-09-19")
         self.assertIsNotNone(r)

@@ -88,11 +88,40 @@ def months_back(today, n):
 # The solver looks for the period's growth between e^-50 and e^50 times: no account's return
 # comes near either, and no float overflows inside it.
 MWR_LOG_RANGE = 50.0
+# Money counts as at work while what has been put in, net, stands at this share of the most it ever stood at, or more.
+# A rate is stated only for a stretch the money was at work for: a balance that sat near nothing for two years, with
+# money passing through it for a few weeks, has a calendar of years and a rate that rests on the pennies that stayed
+# (it read +4299.8% a year on an account worth 4 pounds). The desk's choice; no study sets it (docs/EVIDENCE.md).
+MWR_AT_WORK_SHARE = 0.1
+MWR_YEAR_DAYS = 365          # GIPS: no rate for a period under a year is annualised; here, nor for money at work for less
+
+
+def days_at_work(flows, end_day):
+    """The days, from the first of `flows` to `end_day`, on which the net put in stood at MWR_AT_WORK_SHARE of its
+    highest or more. Money put in is positive; flows on one day are taken together."""
+    by_day = {}
+    for d, a in flows:
+        by_day[d] = by_day.get(d, 0.0) + a
+    days, level, levels = sorted(by_day), 0.0, []
+    for d in days:
+        level += by_day[d]
+        levels.append(level)
+    peak = max(levels) if levels else 0.0
+    if peak <= 0:
+        return 0
+    end = date.fromisoformat(end_day)
+    total = 0
+    for i, d in enumerate(days):
+        if levels[i] >= MWR_AT_WORK_SHARE * peak:
+            until = date.fromisoformat(days[i + 1]) if i + 1 < len(days) else end
+            total += max(0, (until - date.fromisoformat(d)).days)
+    return total
 
 
 def money_weighted_return(flows, end_value, end_day):
     """flows: [(YYYY-MM-DD, amount)] with money put in as positive, taken out as
-    negative. Returns {'annual', 'period', 'days'} or None.
+    negative. Returns {'annual', 'period', 'days', 'at_work', 'steady', 'shown', 'why'} or None. `shown` says which
+    of the two figures may be stated ("annual", "period" or None, with `why`): see MWR_AT_WORK_SHARE.
 
     The IRR solves Σ −flow·(1+r)^((end−t)/365) + end_value = 0. GIPS forbids
     annualising periods under a year, so the page shows `period` (the
@@ -132,7 +161,18 @@ def money_weighted_return(flows, end_value, end_day):
         annual = math.expm1(g / span)
     except OverflowError:
         annual = None
-    return {"annual": annual, "period": math.expm1(g), "days": int(round(span * 365))}
+    days = int(round(span * 365))
+    at_work = days_at_work(flows, end_day)
+    # which figure may be stated: a yearly rate once the money has been at work for a year; for under a year, the
+    # period's own return (not annualised) if the money was at work for half of it; otherwise none, and the reason
+    steady = 2 * at_work >= days
+    shown = ("annual" if annual is not None and at_work >= MWR_YEAR_DAYS else None) if days >= MWR_YEAR_DAYS \
+        else ("period" if steady else None)
+    why = None if shown else (
+        "the money was at work for only %d of the %d days" % (at_work, days) +
+        (", and a yearly rate needs a year of it" if days >= MWR_YEAR_DAYS else ""))
+    return {"annual": annual, "period": math.expm1(g), "days": days, "at_work": at_work, "steady": steady,
+            "shown": shown, "why": why}
 
 
 # ---- sections --------------------------------------------------------------------

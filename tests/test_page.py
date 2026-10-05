@@ -1187,6 +1187,19 @@ class PerformanceChartTests(unittest.TestCase):
         got = json.loads(self.evaluate("[1800, 18000, 7, 100, 96, 250000, 0.3].map(s => curveStep(s, 4))"))
         self.assertEqual(got, [500, 5000, 2, 25, 25, 100000, 0.1])
 
+    def test_a_dip_of_pence_below_zero_is_not_given_a_step_of_axis(self):
+        """The real account's line sat on zero for two years, and the pence below it put -100 on the axis."""
+        got = json.loads(self.evaluate(
+            "[[0, 0, 265, -0.4, 3.98], [0, 265, -40], [5000, 5600, 6200], [0, 0, 0], [-0.4, -0.2], [0, 10, -0.2]].map(v => curveScale(v))"))
+        self.assertEqual((got[0]["lo"], got[0]["hi"]), (0, 300))                 # the dip is clipped to the floor of the scale
+        self.assertEqual((got[1]["lo"], got[1]["hi"]), (-100, 300))             # 40 below zero on a range of 305 is drawn
+        self.assertEqual((got[2]["lo"], got[2]["hi"]), (5000, 6500))            # an account never near zero does not start there
+        self.assertLess(got[3]["lo"], got[3]["hi"])                              # an empty account still has a scale
+        self.assertLess(got[4]["lo"], got[4]["hi"])
+        self.assertEqual(got[5]["lo"], 0)
+        code = read(os.path.join(ROOT, "page", "curve.js"))
+        self.assertIn("(hi - Math.max(v, lo))", code)                            # what is under the floor is drawn on it
+
     def test_a_range_starts_on_the_first_week_inside_it(self):
         days = [(date(2024, 1, 5) + timedelta(days=7 * i)).isoformat() for i in range(120)]      # to 2026-04-24
         program = ("(() => { const C = {days: %s}; const out = {}; "

@@ -57,9 +57,10 @@ function renderHero(){
     const m = g.mwr;
     let ret = '';
     if (m){
-      ret = m.days >= 365
-        ? ' · <span>' + pct1(m.annual, true) + ' a year</span> <span class="why">money-weighted</span>'
-        : ' · <span>' + pct1(m.period, true) + '</span> <span class="why">over ' + held(m.days) + '</span>';
+      // build_desk.money_weighted_return says which figure may be stated (`shown`), and why none may
+      ret = m.shown === 'annual' ? ' · <span>' + pct1(m.annual, true) + ' a year</span> <span class="why">money-weighted</span>'
+        : m.shown === 'period' ? ' · <span>' + pct1(m.period, true) + '</span> <span class="why">over ' + held(m.days) + '</span>'
+        : ' · <span class="why">no rate stated: ' + esc(m.why || 'not recorded') + '</span>';
     }
     gain = '<span>' + money(g.investing, {sign:true}) + '</span> <span class="why">earned by investing</span>' + ret;
   }

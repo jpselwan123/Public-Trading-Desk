@@ -23,8 +23,13 @@ function renderHistory(){
   const cell = (label, html) => '<td data-label="' + label + '">' + html + '</td>';
   const years = H.years.slice().reverse();                        // the latest first
   const T = H.total || {}, TM = T.market || {};
-  const whole = T.return ? (T.return.days >= 365 ? pct1(T.return.annual, true) + ' a year' : pct1(T.return.period, true)) : unknown;
-  const wholeMarket = TM.return ? (TM.return.days >= 365 ? pct1(TM.return.annual, true) + ' a year' : pct1(TM.return.period, true)) : unknown;
+  // build_desk.money_weighted_return says which figure may be stated (`shown`); where none may, the note below says why
+  const notStated = '<span class="withheld">not stated</span>';
+  const stated = r => !r ? unknown : r.shown === 'annual' ? pct1(r.annual, true) + ' a year'
+    : r.shown === 'period' ? pct1(r.period, true) : notStated;
+  const whole = stated(T.return), wholeMarket = stated(TM.return);
+  const wholeWhy = T.return && !T.return.shown ? '<div class="co-note"><b>All years:</b> ' +
+    esc(sentence('no rate is stated, because ' + (T.return.why || 'not recorded'))) + '</div>' : '';
   $('histBody').innerHTML =
     '<div class="scroll-x"><table class="hist-tbl"><thead><tr><th>Year</th><th>Put in</th><th>Taken out</th>' +
       '<th>Earned</th><th>Return</th><th>S&amp;P 500, same money</th><th>Against it</th></tr></thead><tbody>' +
@@ -32,8 +37,8 @@ function renderHistory(){
       const m = y.market || {};
       return '<tr>' + cell('Year', histYear(y)) + cell('Put in', money(y.deposited)) + cell('Taken out', money(y.withdrawn)) +
         cell('Earned', y.earned == null ? unknown : money(y.earned, {sign:true})) +
-        cell('Return', y.return == null ? unknown : pct1(y.return, true)) +
-        cell('S&P 500, same money', m.return == null ? unknown : pct1(m.return, true)) +
+        cell('Return', y.return != null ? pct1(y.return, true) : y.earned == null ? unknown : notStated) +
+        cell('S&P 500, same money', m.return != null ? pct1(m.return, true) : m.value == null ? unknown : notStated) +
         cell('Against it', histAgainst(m.difference)) + '</tr>';
     }).join('') +
     '<tr class="hist-total">' + cell('Year', '<b>All years</b>') + cell('Put in', money(T.deposited)) +
@@ -43,6 +48,7 @@ function renderHistory(){
     '</tbody></table></div>' +
     /* each year left without a figure, and why: history.py's own words */
     years.filter(y => y.why).map(y => '<div class="co-note"><b>' + y.year + ':</b> ' + esc(sentence(y.why)) + '</div>').join('') +
+    wholeWhy +
     about('<p>Each year&rsquo;s return is money-weighted, the same way as the Overview&rsquo;s: what the year began with ' +
       'counts as put in on its first day, and each deposit and withdrawal on its own day. A part year is its own period, ' +
       'never stretched to a year. &ldquo;Earned&rdquo; is the value at the year&rsquo;s end, less its value at the start ' +

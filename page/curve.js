@@ -8,6 +8,17 @@ function curveStep(span, n){
   const raw = span / n, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
 }
+const CURVE_DIP = 0.03;          // a dip under this share of the scale below zero is not given a step of axis
+// The scale for what is drawn: tidy steps over the lowest and highest value. A line that dips below zero by a few pence (the net put in,
+// when the account was all but empty) would be given a whole step under zero, a quarter of the chart, to show nothing; its axis starts
+// at zero and the dip is clipped to it. The pointer's figures are still the exact ones.
+function curveScale(all){
+  let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+  const step = curveStep((hi - lo) || hi || 1, 4), dip = lo < 0 && -lo < CURVE_DIP * (hi - lo);
+  lo = dip ? 0 : Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+  if (hi <= lo) hi = lo + step;                                    // an account that was empty all along still has a scale
+  return {lo, hi, step};
+}
 function axisMoney(v, cur){
   try { return new Intl.NumberFormat(undefined, {style:'currency', currency:cur, notation:'compact', maximumFractionDigits:1}).format(v); }
   catch(e){ return String(Math.round(v)); }                       // a code Intl does not know: still only text
@@ -31,12 +42,9 @@ function drawCurve(animate){
   const i0 = curveFrom(C), days = C.days.slice(i0), A = C.account.slice(i0), M = C.market.slice(i0), N = C.net.slice(i0);
   const t = days.map(d => Date.parse(d + 'T00:00:00Z')), t0 = t[0], t1 = t[t.length - 1];
   const all = A.concat(M.filter(v => v != null), N);
-  let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
-  const step = curveStep((hi - lo) || hi || 1, 4);
-  lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
-  if (hi <= lo) hi = lo + step;                                    // an account that was empty all along still has a scale
+  const {lo, hi, step} = curveScale(all);
   const xs = t.map(v => L + (t1 === t0 ? 0 : (v - t0) / (t1 - t0)) * (W - L - R));
-  const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+  const y = v => T + (hi - Math.max(v, lo)) / (hi - lo) * (H - T - B);
   const line = vals => vals.map((v, i) => v == null ? '' : ((i && vals[i - 1] != null ? 'L' : 'M') + xs[i].toFixed(1) + ',' + y(v).toFixed(1))).join('');
   const stepped = vals => vals.map((v, i) => (i ? 'H' + xs[i].toFixed(1) + 'V' : 'M' + xs[i].toFixed(1) + ',') + y(v).toFixed(1)).join('');
   const base = (H - B).toFixed(1);

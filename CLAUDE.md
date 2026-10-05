@@ -223,7 +223,10 @@ python3 doctor.py [--account|--offline]              # the health report: safe t
   broker's lines are coded the same way (`broker.line_code`). A short ticker names a US filer only
   when the code ends `_US_EQ` (a holding's `us_line`): a London line can share one with an
   unrelated US company, so it is never rated, priced or placed by it.
-- Money-weighted return: don't annualise under 12 months (GIPS).
+- Money-weighted return: don't annualise under 12 months (GIPS), nor money that was at work for less than a year of a longer
+  calendar (`build_desk.money_weighted_return`'s `shown` and `why` decide; the page words them and never decides itself). An account
+  at pence for two years with money through it for weeks once read +4299.8% a year. The chart's axis starts at zero
+  for a dip of pence below it (`curveScale`).
 - UI: clean over dense, one idea per card, click not hover, works at 375px with no horizontal
   scroll, respects `prefers-reduced-motion`, reuse `:root` tokens (no colour written anywhere
   else). A dim slate page: soft light ink on deep blue-grey, one blue accent, text 12px or

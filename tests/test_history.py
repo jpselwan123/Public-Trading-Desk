@@ -210,6 +210,39 @@ class HistoryTests(unittest.TestCase):
         self.assertTrue(all(y["return"] is None and "more was taken out" in y["why"] for y in h["years"]))
         self.assertTrue(all(y["earned"] is not None for y in h["years"]))      # what it earned is still known
 
+    def test_a_year_whose_money_was_at_work_too_little_states_no_return_and_says_why(self):
+        """The return is the year's own period; money at work for under half of the year gives none (an account at
+        pence with money through it for weeks), and the year says so while what it earned stays known."""
+        real = build_desk.money_weighted_return
+
+        def thin(flows, end, day):
+            got = real(flows, end, day)
+            return dict(got, steady=False, shown=None, why="the money was at work for only 3 of the 300 days") if got else got
+
+        build_desk.money_weighted_return = thin
+        try:
+            h = self.build(self.account())
+        finally:
+            build_desk.money_weighted_return = real
+        rows = [y for y in h["years"] if y["earned"] is not None]
+        self.assertTrue(rows)
+        for y in rows:
+            self.assertIsNone(y["return"])
+            self.assertIsNone(y["market"]["return"])
+            self.assertEqual(y["why"], "no return is stated: the money was at work for only 3 of the 300 days")
+        self.assertEqual(h["total"]["return"]["shown"], None)                 # the whole is the same rule, with its reason
+        self.assertIn("only 3 of the 300 days", h["total"]["return"]["why"])
+
+    def test_the_page_words_what_python_decided_and_decides_nothing(self):
+        page = page_source()
+        hero, body = template_function("renderHero", page), template_function("renderHistory", page)
+        for code in (hero, body):
+            self.assertNotRegex(code, r">= ?365")                          # the year is build_desk's
+            self.assertIn("'annual'", code)
+            self.assertIn("'period'", code)
+        self.assertIn("m.why", hero)
+        self.assertIn("T.return.why", body)
+
     def test_the_demo_ties_to_the_penny_and_every_year_is_priced(self):
         today = date(2026, 9, 28)
         raw = generate_demo_data.generate(today)

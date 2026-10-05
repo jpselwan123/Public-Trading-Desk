@@ -431,18 +431,20 @@ def build(raw, account, prices, today):
             row["earned"] = value_end - value_start - net
             money = ([(start, value_start)] if value_start else []) + in_year
             mwr = build_desk.money_weighted_return(money, value_end, end)
-            row["return"] = mwr["period"] if mwr else None
+            row["return"] = mwr["period"] if mwr and mwr["steady"] else None
             market, _, why_market = build_desk.same_money_in_market(
                 in_year, prices, currency, end, opening=(start, value_start) if value_start else None)
             if market is not None:
                 m = build_desk.money_weighted_return(money, market, end)
-                row["market"] = {"value": market, "return": m["period"] if m else None,
+                row["market"] = {"value": market, "return": m["period"] if m and m["steady"] else None,
                                  "difference": value_end - market}
             else:
                 row["market"] = {"why_not": why_market}
             if mwr is None:
                 row["why"] = ("nothing was in the account this year" if not money else
                               "more was taken out than the year began with and put in, so it has no money-weighted return")
+            elif not mwr["steady"]:
+                row["why"] = "no return is stated: " + mwr["why"]
         else:
             row["earned"] = row["return"] = row["market"] = None
             row["why"] = why
