@@ -77,7 +77,8 @@ function pcAge(seconds){ return seconds < 90 ? Math.round(seconds) + ' s' : Math
 function pcNoteDraw(forcedLine){
   const d = pcx.data, feeds = d && d.feeds || [];
   const base = forcedLine ? 'Too many days for candles: drawn as a line.'
-    : d && d.kind === 'intraday' ? 'New York time, regular session. Prices are IEX’s, one exchange, so they can differ a little from the consolidated price.'
+    : d && d.kind === 'intraday' ? 'New York time, regular session. ' + (d.consolidated ? 'Prices are the whole market’s, from Yahoo, which is unofficial.'
+      : 'Prices are IEX’s, one exchange, so they can differ a little from the consolidated price.')
     : d ? 'Prices adjusted for splits. Volume in shares.' : '';
   const sources = feeds.length > 1 ? ' Sources: ' + feeds.map(f => f.name + ' ' + pcAge(f.age)).join(' · ') + '.' : '';
   const differ = d && d.differ ? ' They disagree noticeably right now; the newest is shown.' : '';

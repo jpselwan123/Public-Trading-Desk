@@ -177,6 +177,11 @@ def sources(environ, opener=None, today=None, run=subprocess.run, account=False,
                "APCA-API-SECRET-KEY": environ.get("ALPACA_API_SECRET", "").strip()})
     else:
         rows.append(("Alpaca (chart data)", "skipped", "no Alpaca key pair in .env (optional)", None))
+    if feeds.YAHOO in feeds.keys(environ):
+        check("Yahoo (chart data)", None, feeds.YAHOO_CHART_URL.format(symbol="SPY", minutes=1, days=1),
+              {"User-Agent": feeds.BROWSER})
+    else:
+        rows.append(("Yahoo (chart data)", "skipped", "YAHOO_CHART is not 1 in .env (optional, unofficial)", None))
     check("Finnhub (results, news)", "FINNHUB_API_KEY",
           f"https://finnhub.io/api/v1/quote?symbol=SPY&token={environ.get('FINNHUB_API_KEY', '').strip()}")
     import headlines

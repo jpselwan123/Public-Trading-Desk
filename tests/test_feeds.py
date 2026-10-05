@@ -254,16 +254,140 @@ class CombinedChartTests(unittest.TestCase):
         charts._cache.clear()
         market = Market(finnhub=finnhub_at("2026-10-05T14:59:40Z", 131.0))
         self.chart(market, extra={feeds.FINNHUB: "k"})
-        self.chart(market, extra={feeds.FINNHUB: "k"}, now=NOW + timedelta(seconds=3))
-        self.assertEqual(len(market.host("finnhub.io")), 1)                                          # three seconds on: the same price
-        self.chart(market, extra={feeds.FINNHUB: "k"}, now=NOW + timedelta(seconds=12))
-        self.assertEqual(len(market.host("finnhub.io")), 2)
+        self.chart(market, extra={feeds.FINNHUB: "k"}, now=NOW + timedelta(seconds=2))
+        self.assertEqual(len(market.host("finnhub.io")), 1)                                          # two seconds on: the same price
+        self.chart(market, extra={feeds.FINNHUB: "k"}, now=NOW + timedelta(seconds=charts.FAST_SECONDS))
+        self.assertEqual(len(market.host("finnhub.io")), 2)                                          # a refresh on: a new one
 
     def test_tiingos_count_is_untouched_by_the_other_feeds(self):
         market = Market(finnhub=finnhub_at("2026-10-05T14:59:40Z", 131.0), trade=trade_at("2026-10-05T14:59:50Z", 131.0))
         self.chart(market)
         self.assertEqual(len(charts.asked(self.folder, NOW)), 1)                                    # the daily bars alone
         self.assertEqual(sorted(charts._stored(self.folder)["feeds"]), ["Alpaca", "Finnhub"])
+
+
+def yahoo_answer(price=131.5, when="2026-10-05T14:59:30Z", bars=2):
+    stamps = [unix("2026-10-05T14:57:00Z") + 60 * i for i in range(bars)]
+    return {"chart": {"result": [{"meta": {"regularMarketPrice": price, "regularMarketTime": unix(when), "currency": "USD"},
+                                  "timestamp": stamps,
+                                  "indicators": {"quote": [{"open": [130.0 + i for i in range(bars)], "high": [130.6 + i for i in range(bars)],
+                                                            "low": [129.9 + i for i in range(bars)], "close": [130.4 + i for i in range(bars)],
+                                                            "volume": [500 + i for i in range(bars)]}]}}], "error": None}}
+
+
+class YahooTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        charts._cache.clear()
+
+    def asked(self, answer, status=None):
+        urls = []
+
+        def opener(req, timeout=None):
+            urls.append((req.full_url, dict(req.header_items())))
+            if status:
+                raise urllib.error.HTTPError(req.full_url, status, "no", {}, None)
+            return FakeResponse(answer)
+        opener.urls = urls
+        return opener
+
+    def test_yahoo_is_off_until_env_says_so(self):
+        self.assertNotIn(feeds.YAHOO, feeds.keys({}))
+        self.assertNotIn(feeds.YAHOO, feeds.keys({"YAHOO_CHART": "0"}))
+        self.assertNotIn(feeds.YAHOO, feeds.keys({"YAHOO_CHART": "yes"}))
+        self.assertIn(feeds.YAHOO, feeds.keys({"YAHOO_CHART": " 1 "}))
+        self.assertEqual(feeds.ORDER, (feeds.ALPACA, feeds.FINNHUB, feeds.YAHOO, feeds.TIINGO))
+
+    def test_its_price_and_its_bars_are_read_and_a_gap_in_the_bars_is_skipped(self):
+        opener = self.asked(yahoo_answer())
+        got = feeds.yahoo_chart("brk.b", 1, 1, opener)
+        self.assertEqual(got["quote"], {"price": 131.5, "at": "2026-10-05T14:59:30+00:00", "feed": "Yahoo"})
+        url, headers = opener.urls[0]
+        for part in ("/chart/BRK-B?", "interval=1m", "range=1d", "includePrePost=false"):
+            self.assertIn(part, url)
+        self.assertIn("Mozilla", headers.get("User-agent", ""))                                  # it asks as a browser does
+        bars = charts.parse_intraday(got["rows"])
+        self.assertEqual([(b[1], b[4], b[5]) for b in bars], [(130.0, 130.4, 500.0), (131.0, 131.4, 501.0)])
+        answer = yahoo_answer(bars=3)
+        answer["chart"]["result"][0]["indicators"]["quote"][0]["close"][1] = None                # a minute with no trade
+        self.assertEqual(len(feeds.yahoo_chart("NVDA", 1, 1, self.asked(answer))["rows"]), 2)
+        for nothing in ({}, {"chart": {"result": None, "error": {"code": "Not Found"}}}, {"chart": {"result": [{}]}}, []):
+            self.assertEqual(feeds.yahoo_chart("ZZZZ", 1, 1, self.asked(nothing)), {"quote": None, "rows": []})
+        with self.assertRaises(feeds.FeedError) as e:
+            feeds.yahoo_chart("NVDA", 1, 1, self.asked({}, status=429))
+        self.assertIn("Yahoo", str(e.exception))
+
+    def test_a_chart_without_alpaca_takes_yahoos_whole_market_bars_and_says_so(self):
+        have = {feeds.YAHOO: True}
+        market = Market(tiingo_bars=[{"date": "2026-10-05T14:50:00.000Z", "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}])
+        yahoo = self.asked(yahoo_answer())
+
+        def both(req, timeout=None):
+            return (yahoo if "yahoo.com" in req.full_url else market)(req, timeout)
+        got = charts.chart(self.folder, "NVDA", "1D", key="k", opener=both, now=NOW, extra=have)
+        self.assertEqual((got["consolidated"], got["bar_minutes"]), (True, 1))
+        self.assertEqual(got["labels"][:2], ["10:57", "10:58"])
+        self.assertEqual(got["price"]["via"], "Yahoo")
+        self.assertEqual(got["every_seconds"], charts.FAST_SECONDS)
+        self.assertEqual(market.host("tiingo.com/iex/"), [])                                      # Tiingo's day bars were not needed
+        # the five-day range asks for five days in five-minute bars; a daily range takes only its price
+        charts._cache.clear()
+        charts.chart(self.folder, "NVDA", "5D", key="k", opener=both, now=NOW, extra=have)
+        self.assertIn("range=5d", yahoo.urls[-1][0])
+        self.assertIn("interval=5m", yahoo.urls[-1][0])
+        charts._cache.clear()
+        daily = charts.chart(self.folder, "NVDA", "1M", key="k", opener=both, now=NOW, extra=have)
+        self.assertEqual((daily["price"]["via"], daily["consolidated"]), ("Yahoo", False))
+
+    def test_alpaca_is_preferred_to_yahoo_for_bars_and_yahoo_failing_is_named(self):
+        market = Market(trade=trade_at("2026-10-05T14:59:58Z", 131.4),
+                        bars=[alpaca_bar("2026-10-05T14:58:00Z", 130.4, 130.8, 130.3, 130.7, 600)])
+        yahoo = self.asked(yahoo_answer())
+
+        def both(req, timeout=None):
+            return (yahoo if "yahoo.com" in req.full_url else market)(req, timeout)
+        got = charts.chart(self.folder, "NVDA", "1D", key="k", opener=both, now=NOW,
+                           extra={feeds.ALPACA: ALPACA_PAIR, feeds.YAHOO: True})
+        self.assertFalse(got["consolidated"])
+        self.assertEqual({f["name"] for f in got["feeds"]}, {"Alpaca", "Yahoo"})
+        charts._cache.clear()
+        failing = self.asked({}, status=429)
+
+        def one_fails(req, timeout=None):
+            return (failing if "yahoo.com" in req.full_url else market)(req, timeout)
+        got = charts.chart(self.folder, "NVDA", "1D", key="k", opener=one_fails, now=NOW,
+                           extra={feeds.ALPACA: ALPACA_PAIR, feeds.YAHOO: True})
+        self.assertEqual(got["problems"], ["Yahoo's free limit is used up for now"])
+        self.assertEqual(got["price"]["via"], "Alpaca")
+
+
+class CadenceTests(unittest.TestCase):
+    """The refresh, how long each answer is kept and each feed's allowance are one design: a live chart
+    must see a new price at every refresh, and no feed may be asked more than the charts may."""
+
+    def test_every_fast_answer_is_kept_for_less_than_a_refresh_and_yahoos_for_longer_on_purpose(self):
+        self.assertLess(charts.FAST_SECONDS, 15)
+        self.assertLess(charts.CACHE_SECONDS["quote"], charts.FAST_SECONDS)
+        self.assertLess(charts.CACHE_SECONDS["alpaca_bars"], charts.FAST_SECONDS)
+        self.assertGreater(charts.CACHE_SECONDS["yahoo"], charts.FAST_SECONDS)                       # unofficial: asked gently
+        self.assertGreater(charts.SLOW_SECONDS, charts.FAST_SECONDS)
+
+    def test_a_chart_open_all_minute_stays_within_each_feeds_allowance(self):
+        refreshes = 60 / charts.FAST_SECONDS
+        asks = {feeds.FINNHUB: refreshes,                                                           # one quote a refresh
+                feeds.ALPACA: refreshes * 2,                                                        # a trade and the bars
+                feeds.YAHOO: 60 / charts.CACHE_SECONDS["yahoo"]}                                    # one chart, kept ten seconds
+        for name, per_minute in asks.items():
+            limit, seconds = charts.ALLOWANCE[name]
+            self.assertEqual(seconds, 60)
+            self.assertLessEqual(per_minute, limit, name)
+            self.assertGreaterEqual(limit / per_minute, 1.5, name)                                  # with room to spare for a new chart or a range change
+        self.assertLess(charts.ALLOWANCE[feeds.FINNHUB][0], 60)                                      # Finnhub's 60 a minute is shared with the update
+        self.assertLess(charts.ALLOWANCE[feeds.ALPACA][0], 200)
+
+    def test_the_page_timer_ticks_at_least_as_fast_as_the_refresh(self):
+        tick = int(re.search(r"\}, (\d+)\);", page_source()).group(1))
+        self.assertLessEqual(tick, charts.FAST_SECONDS * 1000)
 
 
 class PageFeedsTests(unittest.TestCase):

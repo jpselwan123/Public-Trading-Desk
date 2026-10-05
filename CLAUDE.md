@@ -314,7 +314,10 @@ Seven tabs with hash routing (`TABS` in the template), each one subject:
   consolidated one. An up candle is hollow and a down one filled: colour says what a number is, never whether it is good.
   "Live" is the newest of every free feed there is a key for (`feeds.py`): Tiingo always; Finnhub's quote with the key already
   used for results and news; Alpaca's IEX latest trade and bars down to the minute with `ALPACA_API_KEY` and
-  `ALPACA_API_SECRET` (a free account's pair, read only; the consolidated feed is paid and never asked). Each is asked as often as
+  `ALPACA_API_SECRET` (a free account's pair, read only; the consolidated feed is paid and never asked). `YAHOO_CHART=1` in `.env`
+  adds Yahoo's public chart address, which needs no key and gives the whole market's price and bars down to the minute; it is
+  unofficial, so it is off until asked for, asked gently, and the chart says when its bars are Yahoo's (`consolidated`). Bars come
+  from Alpaca, else Yahoo, else Tiingo. Each is asked as often as
   its own allowance lets it (`charts.ALLOWANCE` by the minute, `CHART_PER_HOUR` for Tiingo, charged with the company update through
   `prices.update`'s `also_asked`), side by side; the newest price by its own trade time is shown and says whose it is
   (`price.via`), a feed that fails is named in the chart's `problems` and the others carry on, two feeds more than

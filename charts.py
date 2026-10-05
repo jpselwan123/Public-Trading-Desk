@@ -38,9 +38,12 @@ DEFAULT_RANGE = "6M"
 # company update; a chart may use this many of them. Another feed is limited by the minute: Finnhub's
 # free plan allows 60 and Alpaca's 200, and the charts take a third and a third of those.
 CHART_PER_HOUR, CHART_PER_DAY = 24, 300
-ALLOWANCE = {feeds.FINNHUB: (20, 60), feeds.ALPACA: (60, 60)}        # requests, per this many seconds
-FAST_SECONDS, SLOW_SECONDS = 15, 180  # a live chart asks again this often: with a fast feed, and with Tiingo alone
-CACHE_SECONDS = {"daily": 6 * 3600, "intraday": 120, "latest": 120, "quote": 8, "alpaca_bars": 10}
+ALLOWANCE = {feeds.FINNHUB: (20, 60), feeds.ALPACA: (60, 60), feeds.YAHOO: (12, 60)}   # requests, per this many seconds
+FAST_SECONDS, SLOW_SECONDS = 5, 180   # a live chart asks again this often: with a fast feed, and with Tiingo alone
+# How long an answer is kept. A fast feed's is shorter than the refresh, so every refresh sees a new price;
+# Yahoo's is longer, being unofficial and asked gently. test_feeds checks that the refresh and these keep every
+# feed within its allowance.
+CACHE_SECONDS = {"daily": 6 * 3600, "intraday": 120, "latest": 120, "quote": 3, "alpaca_bars": 4, "yahoo": 10}
 LIVE_SESSIONS = ("Pre-market", "Regular session", "After hours")
 STALE_MINUTES = 20                    # a session on the clock with nothing newer than this is a holiday or a halt
 OPEN, CLOSE = "09:30", prices.CLOSE   # the regular session, New York's clock
@@ -281,6 +284,19 @@ def alpaca_intraday(folder, ticker, range_, pair, opener, now):
     return _kept("alpaca_bars", ticker, range_, CACHE_SECONDS["alpaca_bars"], make, now.timestamp())
 
 
+def yahoo_fetch(folder, ticker, range_, opener, now):
+    """Yahoo's chart: {"quote", "rows"} for the day (or, for the five-day range, five days), kept for
+    CACHE_SECONDS["yahoo"]; None when its allowance is spent. Asked for every range, its quote is a price."""
+    days, minutes = (5, 5) if range_ == "5D" else (1, 1)
+
+    def make():
+        if not feed_room(folder, feeds.YAHOO, now):
+            return None
+        _spend(folder, now, feeds.YAHOO)
+        return feeds.yahoo_chart(ticker, minutes, days, opener)
+    return _kept("yahoo", ticker, str(days), CACHE_SECONDS["yahoo"], make, now.timestamp())
+
+
 def fold(bars, quote, minutes):
     """The bars with a fresher price put in: the price joins the bar its moment falls in, or opens a
     new one if the moment is past the last (from the last close, its volume not yet known). Only a
@@ -344,7 +360,7 @@ def build(range_, bars, intraday_bars, quote, now, bars_feed=None, minutes=None)
                "labels": [label(b[0], many) for b in intraday_bars], "bar_minutes": minutes}
     out.update({"range": range_, "kind": kind, "price": head, "live": live, "every_seconds": SLOW_SECONDS,
                 "split_adjusted": True, "demo": False, "currency": "USD", "feeds": [], "differ": False,
-                "problems": []})
+                "problems": [], "consolidated": bars_feed == feeds.YAHOO})
     return out
 
 
@@ -376,27 +392,34 @@ def chart(folder, ticker, range_, key=None, opener=None, now=None, extra=None):
     bars = daily(folder, ticker, key, opener, now)
     intraday_range = RANGES[range_][0] == "intraday"
     tasks = {"quote-" + name: (lambda name=name: fast_quote(folder, name, ticker, have, opener, now))
-             for name in feeds.FAST if name in have}
+             for name in feeds.QUOTES if name in have}
     if intraday_range and feeds.ALPACA in have:
         tasks["bars-" + feeds.ALPACA] = lambda: alpaca_intraday(folder, ticker, range_, have[feeds.ALPACA], opener, now)
+    if feeds.YAHOO in have:
+        tasks["yahoo"] = lambda: yahoo_fetch(folder, ticker, range_, opener, now)
     results, problems = _run(tasks), []
     quotes = []
-    for name in feeds.FAST:
-        if "quote-" + name in results:
-            got, why = results["quote-" + name]
-            quotes += [got] if got else []
-            problems += [why] if why else []
+    for label, (value, why) in results.items():
+        problems += [why] if why else []
+        if label.startswith("quote-") and value:
+            quotes.append(value)
+    yahoo = results.get("yahoo", (None, None))[0] or {}
+    if yahoo.get("quote"):
+        quotes.append(yahoo["quote"])
     got, bars_feed, minutes = [], None, RANGES[range_][2]
     if intraday_range:
-        tried, why = results.get("bars-" + feeds.ALPACA, (None, None))
-        problems += [why] if why else []
-        if tried:
-            got, bars_feed, minutes = tried, feeds.ALPACA, ALPACA_MINUTES[range_]
+        sessions = RANGES[range_][1]
+        alpaca = results.get("bars-" + feeds.ALPACA, (None, None))[0]
+        yahoo_bars = last_sessions(parse_intraday(yahoo.get("rows")), sessions) if yahoo else []
+        if alpaca:
+            got, bars_feed, minutes = alpaca, feeds.ALPACA, ALPACA_MINUTES[range_]
+        elif yahoo_bars:
+            got, bars_feed, minutes = yahoo_bars, feeds.YAHOO, ALPACA_MINUTES[range_]
         else:
             got, bars_feed = intraday(folder, ticker, range_, key, opener, now), feeds.TIINGO
             if not got:
                 raise ChartError(f"Tiingo has no intraday prices for {ticker} yet.")
-    fast = bool(quotes) or bars_feed == feeds.ALPACA
+    fast = bool(quotes) or bars_feed in (feeds.ALPACA, feeds.YAHOO)
     if not quotes and not intraday_range:      # a daily range's price, when no fast feed gave one: Tiingo's latest
         try:
             tiingo = latest(folder, ticker, key, opener, now)

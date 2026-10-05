@@ -1,33 +1,41 @@
 """Where a live price can come from, beside Tiingo (the owner, 5 Oct 2026: "check for other trading
 api charts ... add many and combine them to get it as live as possible").
 
-Two more free ones, each used only when its key is in .env, and each read only:
+More free ones, each used only when .env asks for it, and each read only:
 
   Finnhub  a real-time quote for a US share (60 requests a minute on the free plan). The key the desk
            already uses for results and news. Its candles are a paid feature, so it gives a price only.
   Alpaca   IEX's latest trade and its bars down to the minute (200 requests a minute on the free
            plan), from the same ALPACA_API_KEY and ALPACA_API_SECRET a broker connection uses; a free
            paper account's pair is enough. The consolidated feed is paid and is never asked for.
+  Yahoo    its public chart address: the whole market's price and bars down to the minute, no key. It is
+           unofficial (Yahoo offers no public interface and sets no terms for it, and can change or close
+           it without notice), so it is off until .env says YAHOO_CHART=1, and a personal desk's use of it
+           is gentle (YAHOO's allowance in charts.ALLOWANCE).
 
 Each answers in the same shape as the rest of the desk reads a price: {"price", "at", "feed"} for a
 quote, Tiingo's own row shape for a bar, so that charts.py combines them with what Tiingo gives.
 A key goes in a header, never in an address. A feed that fails says so in words and the others carry on.
 
-Usage: python3 feeds.py NVDA     asks each feed that has a key once
+Usage: python3 feeds.py NVDA     asks each feed that has a key (or is switched on) once
 """
 import json, os, sys, urllib.error, urllib.request
 from datetime import datetime, timezone
 from env_config import load_env, moment, unpacked
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FINNHUB, ALPACA, TIINGO = "Finnhub", "Alpaca", "Tiingo"
-ORDER = (ALPACA, FINNHUB, TIINGO)       # who is preferred when two give the same moment
-FAST = (ALPACA, FINNHUB)                # the feeds that can be asked every few seconds
+FINNHUB, ALPACA, YAHOO, TIINGO = "Finnhub", "Alpaca", "Yahoo", "Tiingo"
+ORDER = (ALPACA, FINNHUB, YAHOO, TIINGO)   # who is preferred when two give the same moment
+FAST = (ALPACA, FINNHUB, YAHOO)         # the feeds that can be asked every few seconds
+QUOTES = (ALPACA, FINNHUB)              # the ones that answer with a price alone (Yahoo's comes with its bars)
 TIMEOUT = 15
 AGREE_SECONDS = 60       # feeds that spoke within this of the newest are compared
 DISAGREE = 0.005         # the desk's choice: half a percent between two feeds at one moment is worth saying
 FINNHUB_QUOTE = "https://finnhub.io/api/v1/quote?symbol={symbol}"
 ALPACA_TRADE = "https://data.alpaca.markets/v2/stocks/{symbol}/trades/latest?feed=iex"
+YAHOO_CHART_URL = ("https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+                   "?interval={minutes}m&range={days}d&includePrePost=false")
+BROWSER = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) trading-desk/1.0"     # as prices.py asks FRED
 ALPACA_BARS = ("https://data.alpaca.markets/v2/stocks/{symbol}/bars?timeframe={minutes}Min&start={start}"
                "&feed=iex&adjustment=split&limit=10000&sort=asc")
 
@@ -37,7 +45,8 @@ class FeedError(Exception):
 
 
 def keys(environ=None):
-    """{feed: its key} for each feed .env has a key for: Finnhub's string, Alpaca's (key, secret)."""
+    """{feed: its key} for each feed .env has a key for, Finnhub's string and Alpaca's (key, secret), and
+    Yahoo (True) if .env says YAHOO_CHART=1."""
     if environ is None:
         load_env(os.path.join(HERE, ".env"))
         environ = os.environ
@@ -48,6 +57,8 @@ def keys(environ=None):
     pair = (str(environ.get("ALPACA_API_KEY") or "").strip(), str(environ.get("ALPACA_API_SECRET") or "").strip())
     if all(pair):
         found[ALPACA] = pair
+    if str(environ.get("YAHOO_CHART") or "").strip() == "1":
+        found[YAHOO] = True                # no key: only the owner's say-so
     return found
 
 
@@ -111,6 +122,33 @@ def alpaca_bars(ticker, minutes, start, pair, opener=None):
     return rows
 
 
+def yahoo_chart(ticker, minutes, days, opener=None):
+    """Yahoo's chart for the last `days` sessions in bars of `minutes`: {"quote": {"price", "at", "feed"} or
+    None, "rows": the bars as charts.parse_intraday reads them}. Its quote is the last regular-session price
+    and the moment of it."""
+    got = _get(YAHOO, YAHOO_CHART_URL.format(symbol=str(ticker).upper().replace(".", "-"), minutes=minutes, days=days),
+               {"User-Agent": BROWSER, "Accept": "application/json"}, opener)
+    results = ((got.get("chart") or {}).get("result") if isinstance(got, dict) else None) or []
+    result = results[0] if results and isinstance(results[0], dict) else {}
+    meta, stamps = result.get("meta") or {}, result.get("timestamp") or []
+    quote = None
+    price, when = meta.get("regularMarketPrice"), meta.get("regularMarketTime")
+    if isinstance(price, (int, float)) and price > 0 and isinstance(when, (int, float)) and when > 0:
+        quote = {"price": float(price), "at": datetime.fromtimestamp(when, timezone.utc).isoformat(timespec="seconds"),
+                 "feed": YAHOO}
+    columns = (((result.get("indicators") or {}).get("quote") or [{}])[0]) or {}
+    rows = []
+    for i, stamp in enumerate(stamps):
+        try:
+            row = {name: columns[name][i] for name in ("open", "high", "low", "close", "volume")}
+        except (KeyError, IndexError, TypeError):
+            continue
+        if isinstance(stamp, (int, float)) and all(isinstance(row[n], (int, float)) for n in ("open", "high", "low", "close")):
+            row["date"] = datetime.fromtimestamp(stamp, timezone.utc).isoformat(timespec="seconds")
+            rows.append(row)
+    return {"quote": quote, "rows": rows}
+
+
 def combine(quotes, now):
     """The newest of the quotes: (best, differ). Ties in time go to the feed ORDER names first. `differ`
     is true when feeds that spoke within AGREE_SECONDS of the newest are more than DISAGREE apart: one of
@@ -130,9 +168,10 @@ def main(argv):
     ticker = (argv[1] if len(argv) > 1 else "SPY").upper()
     have = keys()
     if not have:
-        print("No Finnhub or Alpaca key in .env: nothing to ask.")
+        print("No Finnhub or Alpaca key in .env, and YAHOO_CHART is not 1: nothing to ask.")
         return 1
-    for name, ask in ((FINNHUB, lambda k: finnhub_quote(ticker, k)), (ALPACA, lambda k: alpaca_quote(ticker, k))):
+    for name, ask in ((FINNHUB, lambda k: finnhub_quote(ticker, k)), (ALPACA, lambda k: alpaca_quote(ticker, k)),
+                      (YAHOO, lambda k: yahoo_chart(ticker, 1, 1)["quote"])):
         if name in have:
             try:
                 print(name, ask(have[name]))
