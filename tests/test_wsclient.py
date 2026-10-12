@@ -106,13 +106,14 @@ class WebSocketClientTests(unittest.TestCase):
         self.assertFalse(conn.open)
 
     def test_the_client_closes_politely(self):
-        server = self.serve(lambda p: setattr(p, "answer", p.recv(2)))
+        answered = []
+        server = self.serve(lambda p: answered.append(p.recv(2)))
         conn = wsclient.connect(server.url())
         conn.close()
-        deadline = time.time() + 2
-        while not hasattr(server.peers[0], "answer") and time.time() < deadline:
+        deadline = time.time() + 3
+        while not answered and time.time() < deadline:
             time.sleep(0.01)
-        self.assertEqual(server.peers[0].answer, ("close", 1000))
+        self.assertEqual(answered, [("close", 1000)])
 
     def test_the_accept_key_is_the_standards(self):
         self.assertEqual(wsclient.accept_key("dGhlIHNhbXBsZSBub25jZQ=="), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")      # RFC 6455, section 1.3

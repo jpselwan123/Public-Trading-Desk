@@ -325,7 +325,9 @@ Seven tabs with hash routing (`TABS` in the template), each one subject:
   chart on show, in a session, asks again every `charts.STREAM_SECONDS` (one) while a trade stream feeds it, every
   `charts.FAST_SECONDS` with a fast feed, else every `SLOW_SECONDS`, from the page's one timer (`chartTick`; it ticks every
   second and `marketDue` keeps the company data to its half hours), pausing when the tab is hidden or a pointer is on the chart.
-  A key goes in a header, never in an address. Reads only; the demo's bars are made from its own closes.
+  A key goes in a header, never in an address. Reads only; the demo's bars are made from its own closes. Each source's price is shown beside its age with its gap from the price shown
+  (`feeds[].gap`), and a live chart says to check the price in the broker before ordering: the free feeds are one exchange's or
+  unofficial, never the whole market's by the second.
 - **Trade streams** (`stream.py`, over `wsclient.py`, a small RFC 6455 client on the standard library, the one module that opens
   a socket itself): with an Alpaca key pair, or the Finnhub key, Alpaca's IEX trades (`wss://stream.data.alpaca.markets/v2/iex`;
   the free plan allows one connection and 30 symbols) and Finnhub's (`wss://ws.finnhub.io`; 50 symbols) arrive as they happen. A

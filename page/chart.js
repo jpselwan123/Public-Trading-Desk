@@ -81,10 +81,12 @@ function pcNoteDraw(forcedLine){
     : d && d.kind === 'intraday' ? 'New York time, regular session. ' + (d.consolidated ? 'Prices are the whole market’s, from Yahoo, which is unofficial.'
       : 'Prices are IEX’s, one exchange, so they can differ a little from the consolidated price.')
     : d ? 'Prices adjusted for splits. Volume in shares.' : '';
-  const sources = feeds.length > 1 || (feeds.length && feeds[0].stream) ? ' Sources: ' + feeds.map(f => f.name + (f.stream ? ' stream ' : ' ') + pcAge(f.age)).join(' · ') + '.' : '';
+  const gap = f => f.gap ? ' (' + (f.gap > 0 ? '+' : '−') + pricePer(Math.abs(f.gap), d.currency) + ')' : '';
+  const sources = feeds.length > 1 || (feeds.length && feeds[0].stream) ? ' Sources: ' + feeds.map(f => f.name + (f.stream ? ' stream ' : ' ') + pricePer(f.price, d.currency) + gap(f) + ' ' + pcAge(f.age)).join(' · ') + '.' : '';
+  const verify = d && d.live ? ' Check the price in Trading 212 before you place an order.' : '';
   const differ = d && d.differ ? ' They disagree noticeably right now; the newest is shown.' : '';
   const problems = d && (d.problems || []).length ? ' ' + d.problems.join(' ') : '';
-  $('pcNote').textContent = pcx.message ? pcx.message : base + sources + differ + problems;
+  $('pcNote').textContent = pcx.message ? pcx.message : base + sources + differ + problems + verify;
 }
 
 async function pcLoad(silent){

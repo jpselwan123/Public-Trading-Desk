@@ -214,6 +214,7 @@ class CombinedChartTests(unittest.TestCase):
         self.assertEqual((got["price"]["price"], got["price"]["via"], got["live"]), (131.4, "Alpaca", True))
         self.assertAlmostEqual(got["price"]["change"], 131.4 / LAST_CLOSE - 1)                              # from the last close
         self.assertEqual([(f["name"], f["age"]) for f in got["feeds"]], [("Alpaca", 2), ("Finnhub", 10)])
+        self.assertEqual([f["gap"] for f in got["feeds"]], [0.0, 0.1])                              # each feed's price less the one shown
         self.assertEqual(got["every_seconds"], charts.FAST_SECONDS)
         self.assertEqual(market.host("/iex/?"), [])                                                  # Tiingo's scarce hourly allowance is left alone
         self.assertEqual(len(market.host("tiingo.com")), 1)                                          # the daily bars, once
@@ -527,7 +528,7 @@ class StreamedChartTests(unittest.TestCase):
 class PageFeedsTests(unittest.TestCase):
     def test_the_page_says_whose_price_it_is_how_old_the_others_are_and_when_they_differ(self):
         code = read(os.path.join(ROOT, "page", "chart.js"))
-        for held in ("p.via", "p.stream", "d.streaming", "f.stream", "d.feeds", "d.differ", "d.problems", "pcAge(d.every_seconds)"):
+        for held in ("f.gap", "Trading 212 before you place an order", "p.via", "p.stream", "d.streaming", "f.stream", "d.feeds", "d.differ", "d.problems", "pcAge(d.every_seconds)"):
             self.assertIn(held, code)
         program = code[code.index("function pcAge("):code.index("function pcNoteDraw(")]
         got = json.loads(run_javascript(program + "\nconsole.log(JSON.stringify([pcAge(4), pcAge(15), pcAge(89), pcAge(90), pcAge(180)]));"))

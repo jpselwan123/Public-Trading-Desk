@@ -498,6 +498,7 @@ def chart(folder, ticker, range_, key=None, opener=None, now=None, extra=None, l
                 "differ": differ, "streaming": sorted(pushed, key=feeds.ORDER.index),
                 "problems": problems + [p for p in stream_problems if p not in problems],
                 "feeds": [{"name": q["feed"], "price": round(q["price"], 4), "stream": bool(q.get("stream")),
+                           "gap": round(q["price"] - best["price"], 4),          # from the price shown: what the feeds disagree by
                            "age": max(0, int((now - moment(q["at"])).total_seconds()))}
                           for q in sorted(quotes, key=lambda q: feeds.ORDER.index(q["feed"]))]})
     with _lock:
